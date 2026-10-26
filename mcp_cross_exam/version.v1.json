@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/smusali/mcp-cross-exam/blob/main/mcp_cross_exam/version.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "version", "mcp_version", "python_version", "protocol_revisions"],
+  "properties": {
+    "name": { "const": "mcp-cross-exam" },
+    "version": { "type": "string", "minLength": 1 },
+    "mcp_version": { "type": "string", "minLength": 1 },
+    "python_version": { "type": "string", "minLength": 1 },
+    "protocol_revisions": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        { "const": "2026-07-28" },
+        { "const": "2025-11-25" },
+        { "const": "2025-06-18" },
+        { "const": "2025-03-26" },
+        { "const": "2024-11-05" }
+      ],
+      "items": false
+    }
+  }
+}

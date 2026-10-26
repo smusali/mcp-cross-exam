@@ -1,0 +1,120 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-cross-exam"
+dynamic = ["version"]
+description = "Audit MCP servers by cross-examining them."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Samir Musali", email = "samir.musali@gmail.com" }]
+keywords = [
+  "mcp",
+  "model-context-protocol",
+  "audit",
+  "testing",
+  "ci",
+  "agents",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
+]
+dependencies = [
+  "mcp>=2.3,<3",
+  "httpx>=0.28,<1",
+  "anyio>=4.6,<5",
+  "pydantic>=2.11,<3",
+  "jsonschema>=4.23,<5",
+  "typer>=0.12,<1",
+  "rich>=13,<16",
+  "jinja2>=3.1,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<10",
+  "pytest-socket>=0.8,<1",
+  "pytest-cov>=6,<8",
+  "ruff>=0.14,<1",
+  "mypy>=2,<3",
+  "pre-commit>=4,<5",
+  "build>=1,<2",
+  "twine>=7,<8",
+  "pip-audit>=2.9,<3",
+  "types-jsonschema>=4.23,<5",
+]
+
+[project.scripts]
+mcp-cross-exam = "mcp_cross_exam.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/smusali/mcp-cross-exam"
+Repository = "https://github.com/smusali/mcp-cross-exam"
+Issues = "https://github.com/smusali/mcp-cross-exam/issues"
+Changelog = "https://github.com/smusali/mcp-cross-exam/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "mcp_cross_exam/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mcp_cross_exam"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "mcp_cross_exam",
+  "tests",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["mcp_cross_exam", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.pytest.ini_options]
+addopts = [
+  "--disable-socket",
+  "--allow-unix-socket",
+  "--allow-hosts=127.0.0.1,::1",
+  "--cov=mcp_cross_exam",
+  "--cov-branch",
+  "--cov-report=term-missing",
+  "--cov-fail-under=85",
+]
+testpaths = ["tests"]
+filterwarnings = ["ignore:A test tried to use socket:UserWarning:pytest_socket"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["mcp_cross_exam", "tests", "tools"]
+
+[tool.coverage.run]
+source = ["mcp_cross_exam"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
