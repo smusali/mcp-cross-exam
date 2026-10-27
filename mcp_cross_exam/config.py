@@ -13,7 +13,7 @@ from mcp_cross_exam.transport.base import JsonValue, json_value
 
 Effect = Literal["read", "write", "destructive"]
 Scope = Literal["user", "tenant", "global"]
-SeverityName = Literal["info", "medium", "high"]
+SeverityName = Literal["info", "low", "medium", "high"]
 TransportName = Literal["http", "sse", "stdio"]
 
 

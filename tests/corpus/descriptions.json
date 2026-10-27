@@ -1,0 +1,55 @@
+{
+  "contracts": [
+    {
+      "claims": [
+        [
+          "date",
+          "YYYY-MM-DD",
+          null
+        ],
+        [
+          "limit",
+          "at most 2",
+          2
+        ]
+      ],
+      "description": "Use YYYY-MM-DD. Returns at most 2."
+    }
+  ],
+  "examples": [
+    {
+      "description": "Example `{\"stream\": \"yes\"}`.",
+      "examples": [
+        {
+          "id": "ticket-1"
+        }
+      ],
+      "values": [
+        {
+          "stream": "yes"
+        },
+        {
+          "id": "ticket-1"
+        }
+      ]
+    }
+  ],
+  "mismatches": [
+    {
+      "description": "Read a ticket by `ticket_code` and customerId.",
+      "properties": [
+        "customer_id"
+      ],
+      "quotes": [
+        "ticket_code"
+      ]
+    },
+    {
+      "description": "Use `customer_id` or customerId.",
+      "properties": [
+        "customer_id"
+      ],
+      "quotes": []
+    }
+  ]
+}

@@ -40,6 +40,10 @@ class ToolView:
     output_schema: dict[str, JsonValue] | None
     read_only: bool | None
     destructive: bool | None
+    description: str = ""
+    input_schema: dict[str, JsonValue] | None = None
+    annotations: dict[str, JsonValue] | None = None
+    definition: dict[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +73,7 @@ class Observation:
     saw_header_check: bool = False
     seen_ids: tuple[str, ...] = ()
     resumed_ids: tuple[str, ...] = ()
+    payload: dict[str, JsonValue] | None = None
 
 
 @dataclass(slots=True)
@@ -99,6 +104,9 @@ class ProbeContext:
     started_at: float | None = None
     clock: Callable[[], float] = time.monotonic
     evidence: EvidenceLog | None = None
+    arguments: dict[str, dict[str, JsonValue]] = field(default_factory=dict)
+    observers: dict[str, str] = field(default_factory=dict)
+    snapshot: str | None = None
 
     @property
     def server(self) -> ServerState | None:
@@ -235,6 +243,7 @@ def observation_from_json(payload: JsonValue) -> Observation:
         saw_header_check=payload.get("saw_header_check") is True,
         seen_ids=_strings(payload.get("seen_ids")),
         resumed_ids=_strings(payload.get("resumed_ids")),
+        payload=_object(payload.get("payload")),
     )
 
 
@@ -264,12 +273,28 @@ def _view(item: JsonValue | None) -> ToolView | None:
     output = _object(schema)
     read_only = item.get("read_only")
     destructive = item.get("destructive")
-    if "read_only" not in item and "destructive" not in item:
-        annotations = item.get("annotations")
-        if isinstance(annotations, dict):
-            read_only = _flag(annotations.get("readOnlyHint"))
-            destructive = _flag(annotations.get("destructiveHint"))
-    return ToolView(name, output, _flag(read_only), _flag(destructive))
+    annotations = _object(item.get("annotations"))
+    if "read_only" not in item and "destructive" not in item and annotations is not None:
+        read_only = _flag(annotations.get("readOnlyHint"))
+        destructive = _flag(annotations.get("destructiveHint"))
+    description = item.get("description")
+    text = description if isinstance(description, str) else ""
+    incoming = item.get("input_schema")
+    if incoming is None:
+        incoming = item.get("inputSchema")
+    definition = item if "inputSchema" in item or "definition" not in item else None
+    if definition is None:
+        definition = _object(item.get("definition"))
+    return ToolView(
+        name,
+        output,
+        _flag(read_only),
+        _flag(destructive),
+        text,
+        _object(incoming),
+        annotations,
+        definition,
+    )
 
 
 def _frames(value: JsonValue | None) -> tuple[Frame, ...]:

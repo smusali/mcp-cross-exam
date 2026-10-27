@@ -1,0 +1,233 @@
+{
+  "cases": [
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": [
+        {
+          "kind": "type",
+          "name": "count",
+          "value": "42"
+        },
+        {
+          "kind": "type",
+          "name": "count",
+          "value": 42.5
+        },
+        {
+          "kind": "type",
+          "name": "count",
+          "value": true
+        },
+        {
+          "kind": "type",
+          "name": "count",
+          "value": null
+        }
+      ]
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": [
+        {
+          "kind": "type",
+          "name": "count",
+          "value": "42"
+        },
+        {
+          "kind": "type",
+          "name": "count",
+          "value": 42.5
+        },
+        {
+          "kind": "type",
+          "name": "count",
+          "value": true
+        },
+        {
+          "kind": "type",
+          "name": "count",
+          "value": null
+        },
+        {
+          "kind": "constraint",
+          "name": "count",
+          "value": 9223372036854775808
+        },
+        {
+          "kind": "constraint",
+          "name": "count",
+          "value": 0
+        },
+        {
+          "kind": "constraint",
+          "name": "count",
+          "value": 4
+        }
+      ]
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "flag": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": [
+        {
+          "kind": "type",
+          "name": "flag",
+          "value": "false"
+        },
+        {
+          "kind": "type",
+          "name": "flag",
+          "value": 0
+        },
+        {
+          "kind": "type",
+          "name": "flag",
+          "value": 1
+        },
+        {
+          "kind": "type",
+          "name": "flag",
+          "value": null
+        }
+      ]
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": [
+        {
+          "kind": "constraint",
+          "name": "status",
+          "value": "nope"
+        },
+        {
+          "kind": "constraint",
+          "name": "status",
+          "value": ""
+        },
+        {
+          "kind": "constraint",
+          "name": "status",
+          "value": "OPEN"
+        }
+      ]
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "format": "email",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": [
+        {
+          "kind": "constraint",
+          "name": "to",
+          "value": "not-an-email"
+        }
+      ]
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": []
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": []
+    },
+    {
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "mutations": [
+        {
+          "kind": "type",
+          "name": "items",
+          "value": 1
+        },
+        {
+          "kind": "constraint",
+          "name": "items",
+          "value": []
+        },
+        {
+          "kind": "constraint",
+          "name": "items",
+          "value": [
+            "ok",
+            "ok"
+          ]
+        }
+      ]
+    }
+  ]
+}

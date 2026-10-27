@@ -44,6 +44,7 @@ from mcp_cross_exam.fixture import (
 )
 from mcp_cross_exam.guard import TargetDecision, decide
 from mcp_cross_exam.probes.base import Probe, ProbeContext, RunBudget
+from mcp_cross_exam.probes.schema import collect_definitions
 from mcp_cross_exam.runner import (
     BUDGET_SKIP,
     SelectionError,
@@ -57,8 +58,9 @@ from mcp_cross_exam.runner import (
     select_probes,
     write_result,
 )
+from mcp_cross_exam.schema_audit import write_snapshot
 from mcp_cross_exam.transport import OFFERED_VERSIONS, RunContext, Transport, TransportFailure
-from mcp_cross_exam.transport.base import JsonValue
+from mcp_cross_exam.transport.base import JsonValue, json_value
 from mcp_cross_exam.transport.http import open_http
 from mcp_cross_exam.transport.stdio import open_stdio
 
@@ -102,9 +104,10 @@ class Flags:
     allow_writes: bool = False
     target_is_not_production: bool = False
     fail_on_incomplete: bool = False
+    snapshot: str | None = None
 
 
-_HELD = {"run", "fixture", "probes", "config", "replay"}
+_HELD = {"run", "fixture", "probes", "config", "replay", "snapshot"}
 _stdio_command: ContextVar[tuple[str, ...] | None] = ContextVar("stdio_command", default=None)
 
 
@@ -125,6 +128,7 @@ _VALUE_OPTIONS = {
     "--tool",
     "--jobs",
     "--config",
+    "--snapshot",
 }
 
 
@@ -250,6 +254,7 @@ def _combine(parent: Flags | None, local: Flags) -> Flags:
         allow_writes=parent.allow_writes or local.allow_writes,
         target_is_not_production=parent.target_is_not_production or local.target_is_not_production,
         fail_on_incomplete=parent.fail_on_incomplete or local.fail_on_incomplete,
+        snapshot=_merge(parent.snapshot, local.snapshot),
     )
 
 
@@ -291,6 +296,7 @@ def _is_empty(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         and not flags.allow_writes
         and not flags.target_is_not_production
         and not flags.fail_on_incomplete
+        and flags.snapshot is None
         and not flags.version
         and not flags.as_json
         and not flags.quiet
@@ -337,6 +343,8 @@ def _validate(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         raise UsageFailure("cwd not found")
     if flags.jobs < 1:
         raise UsageFailure("jobs must be at least 1")
+    if flags.snapshot is not None and not Path(flags.snapshot).is_file():
+        raise UsageFailure("snapshot not found")
 
 
 def _env_value(name: str) -> str:
@@ -517,6 +525,7 @@ def _flags_from(
     allow_writes: bool = False,
     target_is_not_production: bool = False,
     fail_on_incomplete: bool = False,
+    snapshot: str | None = None,
 ) -> Flags:
     return Flags(
         version=version,
@@ -544,6 +553,7 @@ def _flags_from(
         allow_writes=allow_writes,
         target_is_not_production=target_is_not_production,
         fail_on_incomplete=fail_on_incomplete,
+        snapshot=snapshot,
     )
 
 
@@ -686,7 +696,25 @@ def _probe_context(
         header_envs=_header_envs(flags),
         command=chosen.command,
         only_tool=flags.tool,
+        arguments=_arguments(chosen.settings),
+        observers=_observers(chosen.settings),
+        snapshot=flags.snapshot,
     )
+
+
+def _arguments(settings: Settings) -> dict[str, dict[str, JsonValue]]:
+    arguments: dict[str, dict[str, JsonValue]] = {}
+    for name, hint in settings.tools.items():
+        if hint.args is None:
+            continue
+        arguments[name] = {key: json_value(item) for key, item in hint.args.items()}
+    return arguments
+
+
+def _observers(settings: Settings) -> dict[str, str]:
+    return {
+        name: hint.observer for name, hint in settings.tools.items() if hint.observer is not None
+    }
 
 
 def _secrets(flags: Flags) -> tuple[str, ...]:
@@ -781,6 +809,10 @@ def root(
         bool,
         typer.Option("--fail-on-incomplete", help="Exit 2 when the budget skips probes."),
     ] = False,
+    snapshot: Annotated[
+        str | None,
+        typer.Option("--snapshot", help="Compare tool definitions with this snapshot."),
+    ] = None,
     version: Annotated[bool, typer.Option("--version", help="Print version facts.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable output.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-error output.")] = False,
@@ -811,6 +843,7 @@ def root(
         allow_writes=allow_writes,
         target_is_not_production=target_is_not_production,
         fail_on_incomplete=fail_on_incomplete,
+        snapshot=snapshot,
         version=version,
         as_json=as_json,
         quiet=quiet,
@@ -902,6 +935,10 @@ def run(
         bool,
         typer.Option("--fail-on-incomplete", help="Exit 2 when the budget skips probes."),
     ] = False,
+    snapshot: Annotated[
+        str | None,
+        typer.Option("--snapshot", help="Compare tool definitions with this snapshot."),
+    ] = None,
     version: Annotated[bool, typer.Option("--version", help="Print version facts.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable output.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-error output.")] = False,
@@ -932,6 +969,7 @@ def run(
         allow_writes=allow_writes,
         target_is_not_production=target_is_not_production,
         fail_on_incomplete=fail_on_incomplete,
+        snapshot=snapshot,
         version=version,
         as_json=as_json,
         quiet=quiet,
@@ -1005,6 +1043,60 @@ def mint_token(
 ) -> None:
     print(EXPIRED_TOKEN if expired else VALID_TOKEN)
     exit_with(ExitCode.SUCCESS)
+
+
+snapshot_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    help="Write a canonical tool snapshot.",
+)
+app.add_typer(snapshot_app, name="snapshot")
+
+
+@snapshot_app.command("write", help="List tools and write a snapshot file.")
+def snapshot_write(
+    ctx: typer.Context,
+    endpoint: Annotated[str | None, typer.Argument(help="Streamable HTTP endpoint.")] = None,
+    out: Annotated[
+        str,
+        typer.Option("--out", help="Snapshot path."),
+    ] = "mcp-cross-exam.tools.json",
+) -> None:
+    flags = _parent(ctx) or Flags()
+    console = console_for(no_color=flags.no_color)
+    try:
+        chosen = _prepare(flags, endpoint, _stdio_command.get(), plan=False, select=False)
+    except (UsageFailure, ConfigError, SelectionError) as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.CONFIG)
+    if not chosen.decision.allowed:
+        console.print(chosen.decision.reason, highlight=False)
+        exit_with(ExitCode.CONFIG)
+    try:
+        anyio.run(_write_tools, chosen, Path(out))
+    except TransportFailure as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.UNREACHABLE)
+    except OSError as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.CONFIG)
+    exit_with(ExitCode.SUCCESS)
+
+
+async def _write_tools(chosen: Chosen, destination: Path) -> None:
+    flags = chosen.flags
+    run_id = uuid.uuid4().hex
+    run_dir = runs_root() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    secrets = _secrets(flags)
+    transport = _open_transport(flags, chosen.endpoint, chosen.command, run_dir)
+    try:
+        await transport.connect()
+        write_snapshot(destination, await collect_definitions(transport))
+    finally:
+        await transport.close()
+        sweep_tree(run_dir, secrets)
 
 
 probes_app = typer.Typer(

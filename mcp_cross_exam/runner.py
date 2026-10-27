@@ -70,9 +70,12 @@ class _Halt:
 
 
 def load_probes() -> tuple[Probe, ...]:
-    from mcp_cross_exam.probes.transport import probes
+    from mcp_cross_exam.probes.transport import probes as transport_probes
 
-    return probes()
+    transport_probes()
+    from mcp_cross_exam.probes.schema import probes as schema_probes
+
+    return schema_probes()
 
 
 def select_probes(
@@ -344,8 +347,19 @@ async def _listed(ctx: ProbeContext) -> tuple[ToolView, ...]:
     try:
         result = await ctx.transport.request("tools/list", {})
     except TransportFailure:
-        return ()
+        return _views_from_frames(ctx.transport.recorder.frames)
     return tool_views(result)
+
+
+def _views_from_frames(frames: Sequence[Frame]) -> tuple[ToolView, ...]:
+    for frame in reversed(frames):
+        parsed = frame.parsed
+        if not isinstance(parsed, dict):
+            continue
+        result = parsed.get("result")
+        if isinstance(result, dict) and isinstance(result.get("tools"), list):
+            return tool_views(result)
+    return ()
 
 
 async def _scoped(
@@ -577,6 +591,8 @@ def _effect(ctx: ProbeContext, name: str) -> str:
     hinted = ctx.effects.get(name)
     if hinted is not None:
         return hinted
+    if ctx.classifications:
+        return "read"
     return classify_tool(ToolView(name, None, None, None)).effect
 
 
@@ -629,6 +645,7 @@ def _public(finding: Finding) -> dict[str, JsonValue]:
         "repro_transcript": finding.repro_transcript,
         "repro_curl": finding.repro_curl,
         "exchange_ids": ids,
+        "data": finding.data,
     }
 
 

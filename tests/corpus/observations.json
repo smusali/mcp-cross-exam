@@ -1,0 +1,270 @@
+{
+  "cases": [
+    {
+      "expect": true,
+      "id": "schema.error-shape.internal-leak",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "argument": "title",
+            "is_error": true,
+            "protocol": false,
+            "text": "Traceback (most recent call last)\ninvalid argument: title"
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.error-shape.internal-leak",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "text": "File \"app.py\", line 3, in call"
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.error-shape.internal-leak",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "text": "at handler ("
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.error-shape.internal-leak",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "text": "SELECT id FROM tickets WHERE id = 1"
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": false,
+      "id": "schema.error-shape.internal-leak",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "text": "failed at the boundary"
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.error-shape.unactionable",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "argument": "title",
+            "is_error": true,
+            "protocol": false,
+            "text": ""
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": false,
+      "id": "schema.error-shape.unactionable",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "argument": "title",
+            "is_error": true,
+            "protocol": false,
+            "text": "invalid argument: title"
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.error-shape.validation-as-protocol-error",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "argument": "title",
+            "protocol": true,
+            "text": "bad"
+          }
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": false,
+      "id": "schema.error-shape.validation-as-protocol-error",
+      "observation": {
+        "payload": {
+          "invalid": {
+            "argument": "title",
+            "protocol": true,
+            "text": "bad"
+          }
+        },
+        "revision": "2025-03-26",
+        "tool": {
+          "name": "create_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.error-shape.unknown-tool",
+      "observation": {
+        "payload": {
+          "error_code": -32601
+        },
+        "revision": "2025-11-25"
+      }
+    },
+    {
+      "expect": false,
+      "id": "schema.error-shape.unknown-tool",
+      "observation": {
+        "payload": {
+          "error_code": -32602
+        },
+        "revision": "2025-11-25"
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.output-nonconformant",
+      "observation": {
+        "payload": {
+          "output_ok": false
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "get_ticket"
+        }
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.silent-coercion",
+      "observation": {
+        "payload": {
+          "mutations": [
+            {
+              "canonical": false,
+              "kind": "type",
+              "name": "include_closed",
+              "observed": true,
+              "severity": "high"
+            }
+          ]
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "list_tickets"
+        }
+      },
+      "severity": "high"
+    },
+    {
+      "expect": true,
+      "id": "schema.silent-coercion",
+      "observation": {
+        "payload": {
+          "mutations": [
+            {
+              "canonical": false,
+              "kind": "type",
+              "name": "include_closed",
+              "observed": false,
+              "severity": "low"
+            }
+          ]
+        },
+        "revision": "2025-11-25",
+        "tool": {
+          "name": "list_tickets"
+        }
+      },
+      "severity": "low"
+    },
+    {
+      "expect": false,
+      "id": "schema.list-changed-not-notified",
+      "observation": {
+        "frames": [
+          {
+            "at": 0,
+            "body": "",
+            "direction": "inbound",
+            "method": "notifications/tools/list_changed"
+          }
+        ],
+        "payload": {
+          "list_changed": true,
+          "notified": false
+        },
+        "revision": "2026-07-28"
+      }
+    },
+    {
+      "expect": false,
+      "id": "schema.list-changed-not-notified",
+      "observation": {
+        "payload": {
+          "list_changed": true,
+          "notified": true
+        },
+        "revision": "2026-07-28"
+      }
+    },
+    {
+      "expect": true,
+      "id": "schema.list-changed-not-notified",
+      "observation": {
+        "payload": {
+          "list_changed": true,
+          "notified": false
+        },
+        "revision": "2026-07-28"
+      }
+    }
+  ]
+}
