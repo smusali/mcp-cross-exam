@@ -16,6 +16,17 @@ from rich.console import Console
 
 from mcp_cross_exam import version_facts
 from mcp_cross_exam.exit_codes import ExitCode, exit_with, set_exit_zero
+from mcp_cross_exam.fixture import (
+    EXPIRED_TOKEN,
+    VALID_TOKEN,
+    FixtureError,
+    parse_bind,
+    parse_defects,
+    parse_era,
+    serve_http,
+    serve_stdio,
+)
+from mcp_cross_exam.probes import ProbeContext, examine
 from mcp_cross_exam.transport import OFFERED_VERSIONS, Transport, TransportFailure
 from mcp_cross_exam.transport.http import open_http
 from mcp_cross_exam.transport.stdio import open_stdio
@@ -45,6 +56,7 @@ class Flags:
     env: tuple[str, ...] = ()
     env_from: tuple[str, ...] = ()
     bearer_env: str | None = None
+    expired_bearer_env: str | None = None
     header_env: tuple[str, ...] = ()
     ca_bundle: str | None = None
     protocol_version: str | None = None
@@ -59,6 +71,7 @@ _VALUE_OPTIONS = {
     "--env",
     "--env-from",
     "--bearer-env",
+    "--expired-bearer-env",
     "--header-env",
     "--ca-bundle",
     "--protocol-version",
@@ -73,7 +86,7 @@ def split_stdio(argv: list[str]) -> tuple[list[str], tuple[str, ...] | None]:
 
 
 def route(argv: list[str]) -> list[str]:
-    if not argv or "run" in argv or argv in (["-h"], ["--help"]):
+    if not argv or "run" in argv or "fixture" in argv or argv in (["-h"], ["--help"]):
         return argv
     routed: list[str] = []
     index = 0
@@ -172,6 +185,7 @@ def _combine(parent: Flags | None, local: Flags) -> Flags:
         env=parent.env + local.env,
         env_from=parent.env_from + local.env_from,
         bearer_env=_merge(parent.bearer_env, local.bearer_env),
+        expired_bearer_env=_merge(parent.expired_bearer_env, local.expired_bearer_env),
         header_env=parent.header_env + local.header_env,
         ca_bundle=_merge(parent.ca_bundle, local.ca_bundle),
         protocol_version=_merge(parent.protocol_version, local.protocol_version),
@@ -187,6 +201,7 @@ def _is_empty(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         and not flags.env
         and not flags.env_from
         and flags.bearer_env is None
+        and flags.expired_bearer_env is None
         and not flags.header_env
         and flags.ca_bundle is None
         and flags.protocol_version is None
@@ -202,7 +217,10 @@ def _validate(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
     parse_target(endpoint, flags.sse, command)
     stdio_only = flags.cwd is not None or bool(flags.env) or bool(flags.env_from)
     http_only = (
-        flags.bearer_env is not None or bool(flags.header_env) or flags.ca_bundle is not None
+        flags.bearer_env is not None
+        or flags.expired_bearer_env is not None
+        or bool(flags.header_env)
+        or flags.ca_bundle is not None
     )
     if command is not None and http_only:
         raise UsageFailure("http options require an http endpoint")
@@ -218,6 +236,8 @@ def _validate(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
             raise UsageFailure(f"environment variable {name} is not set")
     if flags.bearer_env is not None:
         _env_value(flags.bearer_env)
+    if flags.expired_bearer_env is not None:
+        _env_value(flags.expired_bearer_env)
     for item in flags.header_env:
         if "=" not in item or item.startswith("="):
             raise UsageFailure("expected Header=ENV")
@@ -313,6 +333,22 @@ async def _audit(
     transport = _open_transport(flags, endpoint, command, run_dir)
     try:
         context = await transport.connect()
+        expired = (
+            _env_value(flags.expired_bearer_env) if flags.expired_bearer_env is not None else None
+        )
+        url = flags.sse if flags.sse is not None else endpoint
+        context.findings.extend(
+            await examine(
+                ProbeContext(
+                    transport=transport,
+                    run=context,
+                    http=command is None,
+                    endpoint=url,
+                    expired_bearer=expired,
+                    legacy=flags.sse is not None,
+                )
+            )
+        )
         if not flags.quiet:
             console = console_for(no_color=flags.no_color)
             for finding in context.findings:
@@ -320,7 +356,7 @@ async def _audit(
                     f"{finding.severity} {finding.item_id}: {finding.summary}",
                     highlight=False,
                 )
-        if any(item.severity == "medium" for item in context.findings):
+        if any(item.severity in {"medium", "high"} for item in context.findings):
             return ExitCode.FINDINGS
         return ExitCode.SUCCESS
     finally:
@@ -367,6 +403,7 @@ def _flags_from(
     env: list[str] | None,
     env_from: list[str] | None,
     bearer_env: str | None,
+    expired_bearer_env: str | None,
     header_env: list[str] | None,
     ca_bundle: str | None,
     protocol_version: str | None,
@@ -382,6 +419,7 @@ def _flags_from(
         env=_tuple(env),
         env_from=_tuple(env_from),
         bearer_env=bearer_env,
+        expired_bearer_env=expired_bearer_env,
         header_env=_tuple(header_env),
         ca_bundle=ca_bundle,
         protocol_version=protocol_version,
@@ -415,6 +453,13 @@ def root(
         str | None,
         typer.Option("--bearer-env", help="Environment variable holding a bearer token."),
     ] = None,
+    expired_bearer_env: Annotated[
+        str | None,
+        typer.Option(
+            "--expired-bearer-env",
+            help="Environment variable holding an expired bearer token.",
+        ),
+    ] = None,
     header_env: Annotated[
         list[str] | None,
         typer.Option("--header-env", help="Send Header from an environment variable (Header=ENV)."),
@@ -439,6 +484,7 @@ def root(
         env=env,
         env_from=env_from,
         bearer_env=bearer_env,
+        expired_bearer_env=expired_bearer_env,
         header_env=header_env,
         ca_bundle=ca_bundle,
         protocol_version=protocol_version,
@@ -481,6 +527,13 @@ def run(
         str | None,
         typer.Option("--bearer-env", help="Environment variable holding a bearer token."),
     ] = None,
+    expired_bearer_env: Annotated[
+        str | None,
+        typer.Option(
+            "--expired-bearer-env",
+            help="Environment variable holding an expired bearer token.",
+        ),
+    ] = None,
     header_env: Annotated[
         list[str] | None,
         typer.Option("--header-env", help="Send Header from an environment variable (Header=ENV)."),
@@ -505,6 +558,7 @@ def run(
         env=env,
         env_from=env_from,
         bearer_env=bearer_env,
+        expired_bearer_env=expired_bearer_env,
         header_env=header_env,
         ca_bundle=ca_bundle,
         protocol_version=protocol_version,
@@ -522,8 +576,89 @@ def run(
     execute(flags, endpoint, _stdio_command.get())
 
 
+fixture_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    help="Run the bundled fixture server.",
+)
+app.add_typer(fixture_app, name="fixture")
+
+
+@fixture_app.command(help="Serve the fixture over stdio, streamable HTTP, or legacy SSE.")
+def serve(
+    stdio: Annotated[bool, typer.Option("--stdio", help="Speak MCP on standard input.")] = False,
+    http: Annotated[
+        str | None,
+        typer.Option("--http", help="Listen on HOST:PORT for streamable HTTP."),
+    ] = None,
+    sse: Annotated[
+        str | None,
+        typer.Option("--sse", help="Listen on HOST:PORT for legacy HTTP+SSE."),
+    ] = None,
+    era: Annotated[str, typer.Option("--era", help="Protocol revision to speak.")] = "2025-11-25",
+    defects: Annotated[
+        str,
+        typer.Option("--defects", help="Comma-separated probe ids, all, or none."),
+    ] = "none",
+    clean: Annotated[bool, typer.Option("--clean", help="Enable no defects.")] = False,
+) -> None:
+    try:
+        chosen = parse_era(era)
+        selected = parse_defects(defects, clean=clean)
+        modes = (stdio, http is not None, sse is not None)
+        if sum(modes) != 1:
+            raise FixtureError("choose one of --stdio, --http, or --sse")
+    except FixtureError as exc:
+        _fixture_fail(str(exc))
+    if stdio:
+        serve_stdio(chosen, selected)
+        return
+    address = http if http is not None else sse
+    if address is None:
+        _fixture_fail("choose one of --stdio, --http, or --sse")
+    try:
+        host, port = parse_bind(address)
+    except FixtureError as exc:
+        _fixture_fail(str(exc))
+    serve_http(host, port, era=chosen, defects=selected)
+
+
+@fixture_app.command("mint-token", help="Print a bearer token the fixture accepts.")
+def mint_token(
+    expired: Annotated[bool, typer.Option("--expired", help="Print the expired token.")] = False,
+) -> None:
+    print(EXPIRED_TOKEN if expired else VALID_TOKEN)
+    exit_with(ExitCode.SUCCESS)
+
+
+def _fixture_fail(message: str) -> NoReturn:
+    console_for(no_color=False).print(message, highlight=False)
+    exit_with(ExitCode.CONFIG)
+
+
+def _fixture_args(argv: list[str]) -> list[str] | None:
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in _VALUE_OPTIONS:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        if token == "fixture":
+            return argv[index + 1 :]
+        return None
+    return None
+
+
 def dispatch(argv: list[str]) -> None:
     left, command = prepare(argv)
+    fixture_args = _fixture_args(left)
+    if fixture_args is not None:
+        fixture_app(args=fixture_args, standalone_mode=False, prog_name="mcp-cross-exam fixture")
+        return
     token = _stdio_command.set(command)
     try:
         app(args=left, standalone_mode=False, prog_name="mcp-cross-exam")

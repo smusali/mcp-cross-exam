@@ -13,3 +13,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A command-line skeleton with shared exit codes for CI.
 - Offline tests, lint, type checks, and a release workflow that publishes to PyPI with attestations.
 - A transport that connects over stdio, streamable HTTP, and legacy HTTP+SSE, records each frame, and negotiates the protocol revision.
+- Transport and session probes for protocol negotiation, reconnect, SSE resume, and session or bearer expiry, plus a fixture server that can reproduce each one.

@@ -1,5 +1,6 @@
 from mcp_cross_exam.transport.base import (
     OFFERED_VERSIONS,
+    Classification,
     ConnectFailed,
     Finding,
     Frame,
@@ -18,6 +19,7 @@ from mcp_cross_exam.transport.base import (
 
 __all__ = [
     "OFFERED_VERSIONS",
+    "Classification",
     "ConnectFailed",
     "Finding",
     "Frame",

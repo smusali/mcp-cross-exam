@@ -33,7 +33,8 @@ from mcp_cross_exam import DISTRIBUTION_NAME, __version__
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 Direction: TypeAlias = Literal["inbound", "outbound"]
-Severity: TypeAlias = Literal["info", "medium"]
+Severity: TypeAlias = Literal["info", "medium", "high"]
+Classification: TypeAlias = Literal["read", "write", "destructive"]
 
 MODERN_VERSION = "2026-07-28"
 HANDSHAKE_LADDER: tuple[str, ...] = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -119,6 +120,10 @@ class Finding:
     severity: Severity
     summary: str
     evidence: Frame | None
+    frames: tuple[Frame, ...] = ()
+    spec_refs: tuple[str, ...] = ()
+    agent_impact: str | None = None
+    classification: Classification | None = None
 
 
 @dataclass(slots=True)
@@ -151,6 +156,7 @@ class RawChannel(Protocol):
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float | None = None,
+        method: str = "POST",
     ) -> None: ...
 
     async def drop(self) -> None: ...
