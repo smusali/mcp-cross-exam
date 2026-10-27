@@ -82,8 +82,9 @@ class StdioRaw:
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float | None = None,
+        method: str = "POST",
     ) -> None:
-        del headers, timeout
+        del headers, timeout, method
         await self._transport.write_out(body)
 
     async def drop(self) -> None:

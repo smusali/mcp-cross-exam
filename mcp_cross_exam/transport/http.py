@@ -235,8 +235,9 @@ class HttpRaw:
         *,
         headers: Mapping[str, str] | None = None,
         timeout: float | None = None,
+        method: str = "POST",
     ) -> None:
-        await self._transport.send_raw(body, headers=headers, timeout=timeout)
+        await self._transport.send_raw(body, headers=headers, timeout=timeout, method=method)
 
     async def drop(self) -> None:
         await self._transport.drop_raw()
@@ -356,6 +357,7 @@ class HttpTransport:
         *,
         headers: Mapping[str, str] | None,
         timeout: float | None,
+        method: str = "POST",
     ) -> None:
         client = self._http
         if self._closed or client is None:
@@ -367,9 +369,12 @@ class HttpTransport:
         token = call_headers.set(merged)
         try:
             async with self._timeout(timeout):
-                manager = stream_within_origin(
-                    client, "POST", self._url, content=body, headers=merged
-                )
+                if method == "GET":
+                    manager = stream_within_origin(client, method, self._url, headers=merged)
+                else:
+                    manager = stream_within_origin(
+                        client, method, self._url, content=body, headers=merged
+                    )
                 self._raw_cm = manager
                 self.raw_response = await manager.__aenter__()
         finally:

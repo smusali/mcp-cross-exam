@@ -31,18 +31,10 @@ Five failures showed up on the wire, across time, where unit tests stay green:
 
 ## Quick start
 
-The bundled fixture server is not in this revision. When it lands, the demo is:
-
-```sh
-mcp-cross-exam fixture serve --http 127.0.0.1:8765
-mcp-cross-exam http://127.0.0.1:8765/mcp
-```
-
-Until then, install the package and read the command help:
-
 ```sh
 uv sync --extra dev
-uv run mcp-cross-exam --help
+mcp-cross-exam fixture serve --http 127.0.0.1:8765 --defects session.expired-empty-success
+mcp-cross-exam http://127.0.0.1:8765/mcp
 ```
 
 ## Non-goals
@@ -57,4 +49,4 @@ That runner is not in this revision, so the guard is not enforced yet. A reachab
 
 ## Status
 
-This revision is the package, the command, CI, and the transport. Neither probe family is implemented yet. The bundled fixture server is still later.
+This revision is the package, the command, CI, the transport, and the transport and session probes. Schema integrity probes are still later. The fixture server can reproduce each transport and session defect.
