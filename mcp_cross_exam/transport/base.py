@@ -124,6 +124,18 @@ class Finding:
     spec_refs: tuple[str, ...] = ()
     agent_impact: str | None = None
     classification: Classification | None = None
+    detail: str | None = None
+    repro_command: str | None = None
+    repro_transcript: str | None = None
+    repro_curl: str | None = None
+    exchange_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Skip:
+    probe_id: str
+    tool: str | None
+    reason: str
 
 
 @dataclass(slots=True)
@@ -147,6 +159,11 @@ class RunContext:
     logs: RunLogs
     findings: list[Finding] = field(default_factory=list)
     server: ServerState | None = None
+    skips: list[Skip] = field(default_factory=list)
+    guard: str = "local"
+    evidence_dropped: int = 0
+    seed: int = 0
+    run_id: str = ""
 
 
 class RawChannel(Protocol):

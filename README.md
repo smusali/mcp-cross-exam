@@ -43,9 +43,9 @@ Not a pentest. Not a load tester. Not a proxy or gateway. No hosted SaaS in v1.
 
 ## Safety
 
-The runner refuses production targets by default. Writes happen only against allowlisted targets. Credentials are read from the environment and redacted from every artifact.
+The runner decides whether a target is safe before it opens a socket. Stdio and a host whose every address is loopback are local. A host that matches `[target] allow` is allowed. The same allow match plus `--target-is-not-production` is recorded as overridden and prints a warning. Anything else, including a name that only contains `localhost`, is refused and the process exits 2.
 
-That runner is not in this revision, so the guard is not enforced yet. A reachable endpoint is connected, the protocol revision is negotiated, and the process exits. Connection and handshake failures exit 4.
+Write and destructive calls run on local and allow targets. On an overridden target they also need `--allow-writes`. `--read-only` skips them. Credentials are read from the environment and redacted from the run directory. Connection and handshake failures exit 4.
 
 ## Status
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A probe runner with a registry, TOML config, budgets, a production guard, write and revision gates, and redacted evidence with repro and replay commands.
 - Package metadata, the `mcp-cross-exam` command, and version facts for the tool, the MCP SDK, and the supported protocol revisions.
 - A command-line skeleton with shared exit codes for CI.
 - Offline tests, lint, type checks, and a release workflow that publishes to PyPI with attestations.

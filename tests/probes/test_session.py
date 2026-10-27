@@ -168,25 +168,57 @@ def test_expired_bearer_env_rejects_a_break(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_probe_error_does_not_stop_later_probes(tmp_path: Path) -> None:
-    class _Boom(Probe):
-        id = "boom"
-        default_severity = "high"
-        revisions = ("2025-11-25",)
+    async def _go(stage: str, directory: Path) -> tuple[list[Finding], bool]:
+        teardown_ran = False
 
-        async def run(self, ctx: ProbeContext, tool: ToolView | None) -> Observation:
-            del ctx, tool
-            raise RuntimeError("nope")
+        class _Boom(Probe):
+            id = "boom"
+            default_severity = "high"
+            revisions = ("2025-11-25",)
 
-        def assert_(self, observation: Observation) -> list[Finding]:
-            del observation
-            return []
+            async def setup(self, ctx: ProbeContext) -> None:
+                if stage == "setup":
+                    raise RuntimeError("nope")
 
-    async def _go() -> list[str]:
+            async def run(self, ctx: ProbeContext, tool: ToolView | None) -> Observation:
+                if stage == "run":
+                    raise RuntimeError("nope")
+                return Observation(ctx.revision or "2025-11-25", tool, ())
+
+            def assert_(self, observation: Observation) -> list[Finding]:
+                if stage == "assert_":
+                    raise RuntimeError("nope")
+                return []
+
+            async def teardown(self, ctx: ProbeContext) -> None:
+                nonlocal teardown_ran
+                teardown_ran = True
+                if stage == "teardown":
+                    raise RuntimeError("nope")
+
+        class _Later(Probe):
+            id = "later"
+            default_severity = "info"
+            revisions = ("2025-11-25",)
+
+            async def run(self, ctx: ProbeContext, tool: ToolView | None) -> Observation:
+                return Observation(ctx.revision or "2025-11-25", tool, ())
+
+            def assert_(self, observation: Observation) -> list[Finding]:
+                return [
+                    Finding(
+                        item_id="later.ok",
+                        severity="info",
+                        summary="later",
+                        evidence=None,
+                    )
+                ]
+
         app = FixtureApp("2025-11-25", frozenset())
         transport = open_http(
             "http://127.0.0.1:9/mcp",
             network=StreamingASGITransport(app),
-            run_dir=tmp_path,
+            run_dir=directory,
         )
         context = await transport.connect()
         try:
@@ -199,13 +231,21 @@ def test_probe_error_does_not_stop_later_probes(tmp_path: Path) -> None:
                     expired_bearer=None,
                     legacy=False,
                 ),
-                probes=(_Boom(),),
+                probes=(_Boom(), _Later()),
             )
         finally:
             await transport.close()
-        return [item.item_id for item in findings]
+        return findings, teardown_ran
 
-    assert anyio.run(_go) == ["probe.error"]
+    for stage in ("setup", "run", "assert_", "teardown"):
+        findings, teardown_ran = anyio.run(_go, stage, tmp_path / stage)
+        ids = [item.item_id for item in findings]
+        assert "probe.error" in ids
+        assert "later.ok" in ids
+        assert teardown_ran
+        detail = next(item.detail for item in findings if item.item_id == "probe.error")
+        assert detail is not None
+        assert "Traceback" in detail
 
 
 def _challenge(era: str) -> bytes:
