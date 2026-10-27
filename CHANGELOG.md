@@ -12,3 +12,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Package metadata, the `mcp-cross-exam` command, and version facts for the tool, the MCP SDK, and the supported protocol revisions.
 - A command-line skeleton with shared exit codes for CI.
 - Offline tests, lint, type checks, and a release workflow that publishes to PyPI with attestations.
+- A transport that connects over stdio, streamable HTTP, and legacy HTTP+SSE, records each frame, and negotiates the protocol revision.

@@ -3,16 +3,22 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, NoReturn
 from urllib.parse import urlsplit
 
+import anyio
 import typer
 from rich.console import Console
 
 from mcp_cross_exam import version_facts
 from mcp_cross_exam.exit_codes import ExitCode, exit_with, set_exit_zero
+from mcp_cross_exam.transport import OFFERED_VERSIONS, Transport, TransportFailure
+from mcp_cross_exam.transport.http import open_http
+from mcp_cross_exam.transport.stdio import open_stdio
 
 app = typer.Typer(
     add_completion=False,
@@ -35,12 +41,28 @@ class Flags:
     no_color: bool = False
     exit_zero: bool = False
     sse: str | None = None
+    cwd: str | None = None
+    env: tuple[str, ...] = ()
+    env_from: tuple[str, ...] = ()
+    bearer_env: str | None = None
+    header_env: tuple[str, ...] = ()
+    ca_bundle: str | None = None
+    protocol_version: str | None = None
 
 
 _stdio_command: ContextVar[tuple[str, ...] | None] = ContextVar("stdio_command", default=None)
 
 
-_VALUE_OPTIONS = {"--sse"}
+_VALUE_OPTIONS = {
+    "--sse",
+    "--cwd",
+    "--env",
+    "--env-from",
+    "--bearer-env",
+    "--header-env",
+    "--ca-bundle",
+    "--protocol-version",
+}
 
 
 def split_stdio(argv: list[str]) -> tuple[list[str], tuple[str, ...] | None]:
@@ -130,19 +152,29 @@ def _extra_args(ctx: typer.Context) -> list[str]:
     return [item for item in args if isinstance(item, str)]
 
 
+def _merge(left: str | None, right: str | None) -> str | None:
+    if left is not None and right is not None and left != right:
+        raise UsageFailure("conflicting transport flags")
+    return right if right is not None else left
+
+
 def _combine(parent: Flags | None, local: Flags) -> Flags:
     if parent is None:
         return local
-    if parent.sse is not None and local.sse is not None and parent.sse != local.sse:
-        raise UsageFailure("conflicting transport flags")
-    sse = local.sse if local.sse is not None else parent.sse
     return Flags(
         version=parent.version or local.version,
         as_json=parent.as_json or local.as_json,
         quiet=parent.quiet or local.quiet,
         no_color=parent.no_color or local.no_color,
         exit_zero=parent.exit_zero or local.exit_zero,
-        sse=sse,
+        sse=_merge(parent.sse, local.sse),
+        cwd=_merge(parent.cwd, local.cwd),
+        env=parent.env + local.env,
+        env_from=parent.env_from + local.env_from,
+        bearer_env=_merge(parent.bearer_env, local.bearer_env),
+        header_env=parent.header_env + local.header_env,
+        ca_bundle=_merge(parent.ca_bundle, local.ca_bundle),
+        protocol_version=_merge(parent.protocol_version, local.protocol_version),
     )
 
 
@@ -151,12 +183,79 @@ def _is_empty(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         endpoint is None
         and command is None
         and flags.sse is None
+        and flags.cwd is None
+        and not flags.env
+        and not flags.env_from
+        and flags.bearer_env is None
+        and not flags.header_env
+        and flags.ca_bundle is None
+        and flags.protocol_version is None
         and not flags.version
         and not flags.as_json
         and not flags.quiet
         and not flags.no_color
         and not flags.exit_zero
     )
+
+
+def _validate(flags: Flags, endpoint: str | None, command: tuple[str, ...] | None) -> None:
+    parse_target(endpoint, flags.sse, command)
+    stdio_only = flags.cwd is not None or bool(flags.env) or bool(flags.env_from)
+    http_only = (
+        flags.bearer_env is not None or bool(flags.header_env) or flags.ca_bundle is not None
+    )
+    if command is not None and http_only:
+        raise UsageFailure("http options require an http endpoint")
+    if command is None and stdio_only:
+        raise UsageFailure("stdio options require a stdio command")
+    if flags.protocol_version is not None and flags.protocol_version not in OFFERED_VERSIONS:
+        raise UsageFailure("unsupported protocol version")
+    for item in flags.env:
+        if "=" not in item or item.startswith("="):
+            raise UsageFailure("expected KEY=VALUE")
+    for name in flags.env_from:
+        if name not in os.environ:
+            raise UsageFailure(f"environment variable {name} is not set")
+    if flags.bearer_env is not None:
+        _env_value(flags.bearer_env)
+    for item in flags.header_env:
+        if "=" not in item or item.startswith("="):
+            raise UsageFailure("expected Header=ENV")
+        header, env_name = item.split("=", 1)
+        if not header or any(char in header for char in "\r\n"):
+            raise UsageFailure("expected Header=ENV")
+        _env_value(env_name)
+    if flags.ca_bundle is not None and not Path(flags.ca_bundle).is_file():
+        raise UsageFailure("ca bundle not found")
+    if flags.cwd is not None and not Path(flags.cwd).is_dir():
+        raise UsageFailure("cwd not found")
+
+
+def _env_value(name: str) -> str:
+    if name not in os.environ:
+        raise UsageFailure(f"environment variable {name} is not set")
+    value = os.environ[name]
+    if "\n" in value or "\r" in value:
+        raise UsageFailure("header value is invalid")
+    return value
+
+
+def _child_env(flags: Flags) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for item in flags.env:
+        key, value = item.split("=", 1)
+        values[key] = value
+    for name in flags.env_from:
+        values[name] = os.environ[name]
+    return values
+
+
+def _header_values(flags: Flags) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for item in flags.header_env:
+        header, env_name = item.split("=", 1)
+        headers[header] = os.environ[env_name]
+    return headers
 
 
 def console_for(*, no_color: bool) -> Console:
@@ -175,6 +274,59 @@ def emit_version(*, as_json: bool) -> None:
     print(", ".join(facts["protocol_revisions"]))
 
 
+def _open_transport(
+    flags: Flags,
+    endpoint: str | None,
+    command: tuple[str, ...] | None,
+    run_dir: Path,
+) -> Transport:
+    if command is not None:
+        return open_stdio(
+            command,
+            cwd=flags.cwd,
+            env=_child_env(flags),
+            protocol_version=flags.protocol_version,
+            run_dir=run_dir,
+        )
+    url = flags.sse if flags.sse is not None else endpoint
+    if url is None:
+        raise UsageFailure("missing endpoint")
+    verify: bool | str = flags.ca_bundle if flags.ca_bundle is not None else True
+    bearer = _env_value(flags.bearer_env) if flags.bearer_env is not None else None
+    return open_http(
+        url,
+        legacy=flags.sse is not None,
+        bearer=bearer,
+        headers=_header_values(flags),
+        verify=verify,
+        protocol_version=flags.protocol_version,
+        run_dir=run_dir,
+    )
+
+
+async def _audit(
+    flags: Flags,
+    endpoint: str | None,
+    command: tuple[str, ...] | None,
+) -> ExitCode:
+    run_dir = Path(tempfile.mkdtemp(prefix="mcp-cross-exam-"))
+    transport = _open_transport(flags, endpoint, command, run_dir)
+    try:
+        context = await transport.connect()
+        if not flags.quiet:
+            console = console_for(no_color=flags.no_color)
+            for finding in context.findings:
+                console.print(
+                    f"{finding.severity} {finding.item_id}: {finding.summary}",
+                    highlight=False,
+                )
+        if any(item.severity == "medium" for item in context.findings):
+            return ExitCode.FINDINGS
+        return ExitCode.SUCCESS
+    finally:
+        await transport.close()
+
+
 def execute(
     flags: Flags,
     endpoint: str | None,
@@ -185,11 +337,22 @@ def execute(
         emit_version(as_json=flags.as_json)
         exit_with(ExitCode.SUCCESS)
     try:
-        parse_target(endpoint, flags.sse, command)
+        _validate(flags, endpoint, command)
     except UsageFailure as exc:
         console_for(no_color=flags.no_color).print(str(exc), highlight=False)
         exit_with(ExitCode.CONFIG)
-    exit_with(ExitCode.SUCCESS)
+    try:
+        code = anyio.run(_audit, flags, endpoint, command)
+    except TransportFailure as exc:
+        console_for(no_color=flags.no_color).print(str(exc), highlight=False)
+        exit_with(ExitCode.UNREACHABLE)
+    exit_with(code)
+
+
+def _tuple(values: list[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ()
+    return tuple(values)
 
 
 def _flags_from(
@@ -200,6 +363,13 @@ def _flags_from(
     no_color: bool,
     exit_zero: bool,
     sse: str | None,
+    cwd: str | None,
+    env: list[str] | None,
+    env_from: list[str] | None,
+    bearer_env: str | None,
+    header_env: list[str] | None,
+    ca_bundle: str | None,
+    protocol_version: str | None,
 ) -> Flags:
     return Flags(
         version=version,
@@ -208,6 +378,13 @@ def _flags_from(
         no_color=no_color,
         exit_zero=exit_zero,
         sse=sse,
+        cwd=cwd,
+        env=_tuple(env),
+        env_from=_tuple(env_from),
+        bearer_env=bearer_env,
+        header_env=_tuple(header_env),
+        ca_bundle=ca_bundle,
+        protocol_version=protocol_version,
     )
 
 
@@ -224,6 +401,29 @@ def _fail(flags: Flags, exc: UsageFailure) -> NoReturn:
 def root(
     ctx: typer.Context,
     sse: Annotated[str | None, typer.Option("--sse", help="Legacy HTTP+SSE endpoint.")] = None,
+    cwd: Annotated[
+        str | None, typer.Option("--cwd", help="Working directory for a stdio command.")
+    ] = None,
+    env: Annotated[
+        list[str] | None, typer.Option("--env", help="Set KEY=VALUE for a stdio command.")
+    ] = None,
+    env_from: Annotated[
+        list[str] | None,
+        typer.Option("--env-from", help="Copy an environment variable into a stdio command."),
+    ] = None,
+    bearer_env: Annotated[
+        str | None,
+        typer.Option("--bearer-env", help="Environment variable holding a bearer token."),
+    ] = None,
+    header_env: Annotated[
+        list[str] | None,
+        typer.Option("--header-env", help="Send Header from an environment variable (Header=ENV)."),
+    ] = None,
+    ca_bundle: Annotated[str | None, typer.Option("--ca-bundle", help="CA bundle for TLS.")] = None,
+    protocol_version: Annotated[
+        str | None,
+        typer.Option("--protocol-version", help="Offer only this protocol revision."),
+    ] = None,
     version: Annotated[bool, typer.Option("--version", help="Print version facts.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable output.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-error output.")] = False,
@@ -234,12 +434,19 @@ def root(
     ] = False,
 ) -> None:
     flags = _flags_from(
+        sse=sse,
+        cwd=cwd,
+        env=env,
+        env_from=env_from,
+        bearer_env=bearer_env,
+        header_env=header_env,
+        ca_bundle=ca_bundle,
+        protocol_version=protocol_version,
         version=version,
         as_json=as_json,
         quiet=quiet,
         no_color=no_color,
         exit_zero=exit_zero,
-        sse=sse,
     )
     if ctx.invoked_subcommand is not None:
         ctx.obj = flags
@@ -260,6 +467,29 @@ def run(
     ctx: typer.Context,
     endpoint: Annotated[str | None, typer.Argument(help="Streamable HTTP endpoint.")] = None,
     sse: Annotated[str | None, typer.Option("--sse", help="Legacy HTTP+SSE endpoint.")] = None,
+    cwd: Annotated[
+        str | None, typer.Option("--cwd", help="Working directory for a stdio command.")
+    ] = None,
+    env: Annotated[
+        list[str] | None, typer.Option("--env", help="Set KEY=VALUE for a stdio command.")
+    ] = None,
+    env_from: Annotated[
+        list[str] | None,
+        typer.Option("--env-from", help="Copy an environment variable into a stdio command."),
+    ] = None,
+    bearer_env: Annotated[
+        str | None,
+        typer.Option("--bearer-env", help="Environment variable holding a bearer token."),
+    ] = None,
+    header_env: Annotated[
+        list[str] | None,
+        typer.Option("--header-env", help="Send Header from an environment variable (Header=ENV)."),
+    ] = None,
+    ca_bundle: Annotated[str | None, typer.Option("--ca-bundle", help="CA bundle for TLS.")] = None,
+    protocol_version: Annotated[
+        str | None,
+        typer.Option("--protocol-version", help="Offer only this protocol revision."),
+    ] = None,
     version: Annotated[bool, typer.Option("--version", help="Print version facts.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable output.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-error output.")] = False,
@@ -270,12 +500,19 @@ def run(
     ] = False,
 ) -> None:
     local = _flags_from(
+        sse=sse,
+        cwd=cwd,
+        env=env,
+        env_from=env_from,
+        bearer_env=bearer_env,
+        header_env=header_env,
+        ca_bundle=ca_bundle,
+        protocol_version=protocol_version,
         version=version,
         as_json=as_json,
         quiet=quiet,
         no_color=no_color,
         exit_zero=exit_zero,
-        sse=sse,
     )
     parent = ctx.obj if isinstance(ctx.obj, Flags) else None
     try:
