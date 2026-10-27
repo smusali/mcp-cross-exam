@@ -33,7 +33,7 @@ from mcp_cross_exam import DISTRIBUTION_NAME, __version__
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 Direction: TypeAlias = Literal["inbound", "outbound"]
-Severity: TypeAlias = Literal["info", "medium", "high"]
+Severity: TypeAlias = Literal["info", "low", "medium", "high"]
 Classification: TypeAlias = Literal["read", "write", "destructive"]
 
 MODERN_VERSION = "2026-07-28"
@@ -129,6 +129,7 @@ class Finding:
     repro_transcript: str | None = None
     repro_curl: str | None = None
     exchange_ids: tuple[str, ...] = ()
+    data: dict[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True, slots=True)
