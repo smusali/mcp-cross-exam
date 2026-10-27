@@ -53,8 +53,8 @@ Not a pentest. Not a load tester. Not a proxy or gateway. No hosted SaaS in v1.
 
 The runner refuses production targets by default. Writes happen only against allowlisted targets. Credentials are read from the environment and redacted from every artifact.
 
-That runner is not in this revision, so the guard is not enforced yet. A valid endpoint is parsed and the process exits without opening a connection.
+That runner is not in this revision, so the guard is not enforced yet. A reachable endpoint is connected, the protocol revision is negotiated, and the process exits. Connection and handshake failures exit 4.
 
 ## Status
 
-This revision is the package, the command, and CI. Neither probe family is implemented yet.
+This revision is the package, the command, CI, and the transport. Neither probe family is implemented yet. The bundled fixture server is still later.

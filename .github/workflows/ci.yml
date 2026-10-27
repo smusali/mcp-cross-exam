@@ -61,6 +61,9 @@ jobs:
       - name: Types
         run: uv run mypy --strict mcp_cross_exam tests tools
 
+      - name: Imports
+        run: uv run lint-imports
+
   package:
     runs-on: ubuntu-latest
     steps:

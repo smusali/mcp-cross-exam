@@ -17,3 +17,9 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+      - id: lint-imports
+        name: lint-imports
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]

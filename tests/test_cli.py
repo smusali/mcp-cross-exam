@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 from importlib.metadata import version
 from pathlib import Path
 
@@ -27,24 +28,24 @@ def _invoke(argv: list[str]) -> typer.testing.Result:
 
 
 def test_streamable_http_and_run_alias() -> None:
-    bare = _invoke(["https://example.com/mcp"])
-    via_run = _invoke(["run", "https://example.com/mcp"])
-    plain = _invoke(["http://example.com/mcp"])
-    assert bare.exit_code == 0
-    assert via_run.exit_code == 0
-    assert plain.exit_code == 0
+    bare = _invoke(["http://127.0.0.1:9/mcp"])
+    via_run = _invoke(["run", "http://127.0.0.1:9/mcp"])
+    plain = _invoke(["http://127.0.0.1:9/health"])
+    assert bare.exit_code == ExitCode.UNREACHABLE
+    assert via_run.exit_code == ExitCode.UNREACHABLE
+    assert plain.exit_code == ExitCode.UNREACHABLE
     assert bare.stdout == ""
 
 
 def test_sse_and_stdio_forms() -> None:
-    sse = _invoke(["--sse", "https://example.com/sse"])
-    via_run = _invoke(["run", "--sse", "http://127.0.0.1:8765/sse"])
-    stdio = _invoke(["--", "python", "server.py"])
-    via_run_stdio = _invoke(["run", "--", "python", "server.py", "--port", "1"])
-    assert sse.exit_code == 0
-    assert via_run.exit_code == 0
-    assert stdio.exit_code == 0
-    assert via_run_stdio.exit_code == 0
+    sse = _invoke(["--sse", "http://127.0.0.1:9/sse"])
+    via_run = _invoke(["run", "--sse", "http://127.0.0.1:9/sse"])
+    stdio = _invoke(["--", sys.executable, "-c", "raise SystemExit(0)"])
+    via_run_stdio = _invoke(["run", "--", sys.executable, "-c", "raise SystemExit(0)"])
+    assert sse.exit_code == ExitCode.UNREACHABLE
+    assert via_run.exit_code == ExitCode.UNREACHABLE
+    assert stdio.exit_code == ExitCode.UNREACHABLE
+    assert via_run_stdio.exit_code == ExitCode.UNREACHABLE
 
 
 def test_usage_errors_exit_config() -> None:
@@ -90,11 +91,11 @@ def test_installed_version_matches_package() -> None:
 
 
 def test_flags_are_accepted() -> None:
-    quiet = _invoke(["--quiet", "--json", "--no-color", "https://example.com/mcp"])
-    held = _invoke(["--exit-zero", "https://example.com/mcp"])
-    assert quiet.exit_code == 0
+    quiet = _invoke(["--quiet", "--json", "--no-color", "http://127.0.0.1:9/mcp"])
+    held = _invoke(["--exit-zero", "http://127.0.0.1:9/mcp"])
+    assert quiet.exit_code == ExitCode.UNREACHABLE
     assert quiet.stdout == ""
-    assert held.exit_code == 0
+    assert held.exit_code == ExitCode.UNREACHABLE
 
 
 def test_help_lists_only_the_run_command() -> None:
@@ -170,8 +171,8 @@ def test_main_maps_interrupts_usage_and_bugs(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_main_runs_a_valid_endpoint() -> None:
     with pytest.raises(SystemExit) as caught:
-        main(["https://example.com/mcp"])
-    assert caught.value.code == ExitCode.SUCCESS
+        main(["http://127.0.0.1:9/mcp"])
+    assert caught.value.code == ExitCode.UNREACHABLE
 
 
 def test_non_loopback_socket_is_blocked() -> None:
