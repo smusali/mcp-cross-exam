@@ -38,6 +38,7 @@ from mcp_cross_exam.fixture import (
     parse_bind,
     parse_defects,
     parse_era,
+    parse_ttl,
     serve_http,
     serve_stdio,
 )
@@ -971,17 +972,22 @@ def serve(
         typer.Option("--defects", help="Comma-separated probe ids, all, or none."),
     ] = "none",
     clean: Annotated[bool, typer.Option("--clean", help="Enable no defects.")] = False,
+    token_ttl_s: Annotated[
+        float | None,
+        typer.Option("--token-ttl-s", help="Seconds before the valid bearer expires."),
+    ] = None,
 ) -> None:
     try:
         chosen = parse_era(era)
         selected = parse_defects(defects, clean=clean)
+        ttl = parse_ttl(token_ttl_s)
         modes = (stdio, http is not None, sse is not None)
         if sum(modes) != 1:
             raise FixtureError("choose one of --stdio, --http, or --sse")
     except FixtureError as exc:
         _fixture_fail(str(exc))
     if stdio:
-        serve_stdio(chosen, selected)
+        serve_stdio(chosen, selected, token_ttl_s=ttl)
         return
     address = http if http is not None else sse
     if address is None:
@@ -990,7 +996,7 @@ def serve(
         host, port = parse_bind(address)
     except FixtureError as exc:
         _fixture_fail(str(exc))
-    serve_http(host, port, era=chosen, defects=selected)
+    serve_http(host, port, era=chosen, defects=selected, token_ttl_s=ttl)
 
 
 @fixture_app.command("mint-token", help="Print a bearer token the fixture accepts.")

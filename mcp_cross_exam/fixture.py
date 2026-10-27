@@ -6,7 +6,10 @@ import sys
 import time
 from collections.abc import Awaitable, Callable, MutableMapping
 from dataclasses import dataclass
+from urllib.parse import parse_qs
 
+import anyio
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp_types import PROTOCOL_VERSION_META_KEY
 from mcp_types.jsonrpc import (
     HEADER_MISMATCH,
@@ -15,6 +18,7 @@ from mcp_types.jsonrpc import (
     UNSUPPORTED_PROTOCOL_VERSION,
 )
 
+from mcp_cross_exam import SUPPORTED_PROTOCOL_REVISIONS
 from mcp_cross_exam.transport.base import JsonValue, ProtocolError, json_value
 
 Message = MutableMapping[str, object]
@@ -22,7 +26,7 @@ Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
 
 MODERN = "2026-07-28"
-ERAS = (MODERN, "2025-11-25")
+ERAS = SUPPORTED_PROTOCOL_REVISIONS
 VALID_TOKEN = "fixture-valid"
 EXPIRED_TOKEN = "fixture-expired"
 DEFECT_IDS = (
@@ -62,6 +66,14 @@ def parse_era(value: str) -> str:
     return value
 
 
+def parse_ttl(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if value < 0:
+        raise FixtureError("token ttl must be non-negative")
+    return value
+
+
 def parse_bind(value: str) -> tuple[str, int]:
     host, separator, port = value.rpartition(":")
     if not separator or not host or not port.isdigit():
@@ -83,19 +95,48 @@ class Reply:
 
 
 class FixtureState:
-    def __init__(self, era: str, defects: frozenset[str], *, token: str) -> None:
+    def __init__(
+        self,
+        era: str,
+        defects: frozenset[str],
+        *,
+        token: str,
+        token_ttl_s: float | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self.era = era
         self.defects = defects
         self.token = token
+        self.token_ttl_s = token_ttl_s
+        self.clock = time.monotonic if clock is None else clock
+        self.issued_at = self.clock()
         self.sse_token: str | None = None
         self.generation = 0
         self.sessions: set[str] = set()
         self.events: list[tuple[str, bytes]] = []
+        self.listeners: dict[str, MemoryObjectSendStream[bytes]] = {}
 
     def mint_sse(self) -> str:
         self.sse_token = secrets.token_hex(4)
         self.generation += 1
         return self.sse_token
+
+    def bearer_expired(self, token: str) -> bool:
+        if token == EXPIRED_TOKEN:
+            return True
+        if token != VALID_TOKEN or self.token_ttl_s is None:
+            return False
+        return self.clock() - self.issued_at >= self.token_ttl_s
+
+    def drop_sessions(self) -> None:
+        self.sessions.clear()
+
+    def reset_run(self) -> None:
+        self.drop_sessions()
+        self.events.clear()
+        self.generation = 0
+        self.sse_token = None
+        self.issued_at = self.clock()
 
     def answer(
         self,
@@ -153,14 +194,15 @@ def _auth(
     token = _bearer(headers.get("authorization", ""))
     if token is None:
         return None
-    if token == VALID_TOKEN:
+    expired = state.bearer_expired(token)
+    if token == VALID_TOKEN and not expired:
         return None
     if (
-        token == EXPIRED_TOKEN
+        expired
         and method == "tools/call"
         and "session.token-expired-empty-success" in state.defects
     ):
-        return _result_reply(rpc_id, _empty_result())
+        return _result_reply(rpc_id, _stamped(state, _empty_result()))
     challenge = 'Bearer error="invalid_token"'
     if state.era >= "2025-06-18":
         challenge += f', resource_metadata="{origin}/.well-known/oauth-protected-resource"'
@@ -326,11 +368,11 @@ def _call(
     name = params.get("name")
     arguments = params.get("arguments")
     if name == "list_tickets":
-        return _result_reply(rpc_id, _ticket_list())
+        return _result_reply(rpc_id, _stamped(state, _ticket_list()))
     if name == "slow_report":
-        return _slow_report(rpc_id, arguments)
+        return _slow_report(state, rpc_id, arguments)
     if name == "create_ticket":
-        return _result_reply(rpc_id, _created())
+        return _result_reply(rpc_id, _stamped(state, _created()))
     if name != "get_ticket":
         return _error_reply(rpc_id, 200, INVALID_PARAMS, "Unknown tool")
     if isinstance(arguments, dict) and arguments.get("stream") is True:
@@ -339,7 +381,7 @@ def _call(
             return Reply(200, "text/event-stream", b"", chunks=(first, second))
         line = _result_body(rpc_id, _ticket(state)) + b"\n"
         return Reply(200, "application/json", line[32:], prefix=line[:32])
-    return _result_reply(rpc_id, _ticket(state))
+    return _result_reply(rpc_id, _stamped(state, _ticket(state)))
 
 
 def _stream(state: FixtureState) -> tuple[bytes, bytes]:
@@ -390,14 +432,22 @@ def _delay(arguments: JsonValue) -> float:
     return min(float(raw), 30.0)
 
 
-def _slow_report(rpc_id: JsonValue | None, arguments: JsonValue) -> Reply:
+def _slow_report(
+    state: FixtureState,
+    rpc_id: JsonValue | None,
+    arguments: JsonValue,
+) -> Reply:
     delay = _delay(arguments)
     if delay > 0:
         time.sleep(delay)
-    return _result_reply(
-        rpc_id,
-        {"content": [{"type": "text", "text": "ok"}], "isError": False},
-    )
+    result: dict[str, JsonValue] = {"content": [{"type": "text", "text": "ok"}], "isError": False}
+    return _result_reply(rpc_id, _stamped(state, result))
+
+
+def _stamped(state: FixtureState, result: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    if state.era == MODERN:
+        result["resultType"] = "complete"
+    return result
 
 
 def _tools_result() -> dict[str, JsonValue]:
@@ -515,8 +565,14 @@ def _object(raw: bytes) -> dict[str, JsonValue] | None:
 
 
 class FixtureApp:
-    def __init__(self, era: str, defects: frozenset[str]) -> None:
-        self.state = FixtureState(era, defects, token="http")
+    def __init__(
+        self,
+        era: str,
+        defects: frozenset[str],
+        *,
+        token_ttl_s: float | None = None,
+    ) -> None:
+        self.state = FixtureState(era, defects, token="http", token_ttl_s=token_ttl_s)
 
     async def __call__(self, scope: Message, receive: Receive, send: Send) -> None:
         kind = scope.get("type")
@@ -539,19 +595,27 @@ class FixtureApp:
             await _plain(send, 404, b"missing")
             return
         body = await _read_body(receive)
-        require = path_text.rstrip("/") == "/mcp"
+        target = path_text.rstrip("/")
         reply = self.state.answer(
             body,
             _headers(scope),
             http=True,
             origin=_origin(scope),
-            require_session=require,
+            require_session=target == "/mcp",
         )
+        if target == "/messages":
+            await _publish(self.state, scope, reply, send)
+            return
         await _write(send, reply)
 
 
-def serve_stdio(era: str, defects: frozenset[str]) -> None:
-    state = FixtureState(era, defects, token=secrets.token_hex(4))
+def serve_stdio(
+    era: str,
+    defects: frozenset[str],
+    *,
+    token_ttl_s: float | None = None,
+) -> None:
+    state = FixtureState(era, defects, token=secrets.token_hex(4), token_ttl_s=token_ttl_s)
     while True:
         line = sys.stdin.buffer.readline()
         if not line:
@@ -567,11 +631,22 @@ def serve_stdio(era: str, defects: frozenset[str]) -> None:
         sys.stdout.buffer.flush()
 
 
-def serve_http(host: str, port: int, *, era: str, defects: frozenset[str]) -> None:
+def serve_http(
+    host: str,
+    port: int,
+    *,
+    era: str,
+    defects: frozenset[str],
+    token_ttl_s: float | None = None,
+) -> None:
     import uvicorn
 
     uvicorn.run(
-        FixtureApp(era, defects), host=host, port=port, log_level="warning", access_log=False
+        FixtureApp(era, defects, token_ttl_s=token_ttl_s),
+        host=host,
+        port=port,
+        log_level="warning",
+        access_log=False,
     )
 
 
@@ -582,10 +657,10 @@ async def _control(state: FixtureState, path: str, method: str, scope: Message, 
     if method != "POST":
         await _plain(send, 405, b"")
         return
-    state.sessions.clear()
     if path.endswith("/reset"):
-        state.generation = 0
-        state.sse_token = None
+        state.reset_run()
+    else:
+        state.drop_sessions()
     await _plain(send, 200, b'{"ok":true}', "application/json")
 
 
@@ -601,16 +676,70 @@ async def _get(
         await _plain(send, 200, state.resume(last), "text/event-stream")
         return
     if path == "/sse":
-        session_id = state.mint_sse()
-        await _start(send, 200, "text/event-stream", ())
-        await _chunk(
-            send, f"event: endpoint\ndata: /messages/?session_id={session_id}\n\n".encode(), True
-        )
-        await _wait_disconnect(receive, send)
+        await _open_sse(state, receive, send)
         return
     await _start(send, 200, "text/event-stream", ())
     await _chunk(send, b": idle\n\n", True)
     await _wait_disconnect(receive, send)
+
+
+async def _open_sse(state: FixtureState, receive: Receive, send: Send) -> None:
+    session_id = state.mint_sse()
+    outbound, inbound = anyio.create_memory_object_stream[bytes](16)
+    state.listeners[session_id] = outbound
+    try:
+        await _start(send, 200, "text/event-stream", ())
+        endpoint = f"event: endpoint\ndata: /messages/?session_id={session_id}\n\n".encode()
+        await _chunk(send, endpoint, True)
+        async with anyio.create_task_group() as group:
+            group.start_soon(_pump, inbound, send)
+            await _until_disconnect(receive)
+            group.cancel_scope.cancel()
+        await _chunk(send, b"", False)
+    finally:
+        if state.listeners.get(session_id) is outbound:
+            state.listeners.pop(session_id, None)
+        await outbound.aclose()
+        await inbound.aclose()
+
+
+async def _publish(state: FixtureState, scope: Message, reply: Reply, send: Send) -> None:
+    session_id = _query_value(scope, "session_id")
+    listener = None if session_id is None else state.listeners.get(session_id)
+    if listener is None:
+        await _plain(send, 404, b"missing")
+        return
+    if reply.body:
+        try:
+            await listener.send(_message_event(reply.body))
+        except anyio.ClosedResourceError:
+            await _plain(send, 404, b"missing")
+            return
+    await _plain(send, 202, b"")
+
+
+async def _pump(inbound: MemoryObjectReceiveStream[bytes], send: Send) -> None:
+    async for payload in inbound:
+        await _chunk(send, payload, True)
+
+
+def _message_event(body: bytes) -> bytes:
+    data = b"\n".join(b"data: " + line for line in body.split(b"\n"))
+    return b"event: message\n" + data + b"\n\n"
+
+
+def _query_value(scope: Message, name: str) -> str | None:
+    raw = scope.get("query_string")
+    if isinstance(raw, bytes):
+        text = raw.decode()
+    elif isinstance(raw, str):
+        text = raw
+    else:
+        return None
+    found = parse_qs(text, keep_blank_values=False).get(name)
+    if not found:
+        return None
+    return found[0]
 
 
 async def _lifespan(receive: Receive, send: Send) -> None:
@@ -663,12 +792,16 @@ async def _chunk(send: Send, payload: bytes, more: bool) -> None:
     await send({"type": "http.response.body", "body": payload, "more_body": more})
 
 
-async def _wait_disconnect(receive: Receive, send: Send) -> None:
+async def _until_disconnect(receive: Receive) -> None:
     while True:
         message = await receive()
         if message.get("type") == "http.disconnect":
-            await _chunk(send, b"", False)
             return
+
+
+async def _wait_disconnect(receive: Receive, send: Send) -> None:
+    await _until_disconnect(receive)
+    await _chunk(send, b"", False)
 
 
 async def _read_body(receive: Receive) -> bytes:
