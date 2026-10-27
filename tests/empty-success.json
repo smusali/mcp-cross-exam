@@ -1,0 +1,18 @@
+{
+  "revision": "2025-11-25",
+  "tool": {
+    "name": "get_ticket",
+    "read_only": true,
+    "destructive": false,
+    "output_schema": null
+  },
+  "calls": [
+    {
+      "status": 200,
+      "headers": {},
+      "result": {"content": [], "isError": false},
+      "error_code": null,
+      "timed_out": false
+    }
+  ]
+}

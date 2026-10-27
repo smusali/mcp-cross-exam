@@ -18,6 +18,7 @@ from mcp_cross_exam.probes.base import (
     ProbeContext,
     ToolView,
     is_empty_success,
+    register,
     tool_class,
 )
 from mcp_cross_exam.transport import Finding, Frame, Timeout, TransportFailure
@@ -35,6 +36,7 @@ _RFC_6750 = "https://www.rfc-editor.org/rfc/rfc6750"
 _RFC_9728 = "https://www.rfc-editor.org/rfc/rfc9728"
 
 
+@register
 class VersionNegotiation(Probe):
     id = "transport.version-negotiation"
     default_severity = "high"
@@ -76,6 +78,7 @@ class VersionNegotiation(Probe):
             await ctx.transport.reset()
 
 
+@register
 class CapabilitiesHonesty(Probe):
     id = "transport.capabilities-honesty"
     default_severity = "high"
@@ -109,6 +112,7 @@ class CapabilitiesHonesty(Probe):
         return []
 
 
+@register
 class RequiredHeaders(Probe):
     id = "transport.required-headers"
     default_severity = "high"
@@ -140,6 +144,7 @@ class RequiredHeaders(Probe):
         ]
 
 
+@register
 class UnknownMethod(Probe):
     id = "transport.unknown-method"
     default_severity = "high"
@@ -163,6 +168,7 @@ class UnknownMethod(Probe):
         ]
 
 
+@register
 class TokenExpired(Probe):
     id = "session.token-expired-empty-success"
     default_severity = "high"
@@ -197,6 +203,7 @@ class TokenExpired(Probe):
         ]
 
 
+@register
 class SessionExpiredNot404(Probe):
     id = "session.expired-not-404"
     default_severity = "high"
@@ -213,6 +220,7 @@ class SessionExpiredNot404(Probe):
         return _expired_finding(self, observation, want_empty=False)
 
 
+@register
 class SessionExpiredEmptySuccess(Probe):
     id = "session.expired-empty-success"
     default_severity = "high"
@@ -229,6 +237,7 @@ class SessionExpiredEmptySuccess(Probe):
         return _expired_finding(self, observation, want_empty=True)
 
 
+@register
 class ResumeGap(Probe):
     id = "transport.resume-gap"
     default_severity = "medium"
@@ -272,6 +281,7 @@ class ResumeGap(Probe):
         ]
 
 
+@register
 class ReconnectFails(Probe):
     id = "transport.reconnect-fails"
     default_severity = "high"
@@ -303,17 +313,10 @@ class ReconnectFails(Probe):
         return []
 
 
-PROBES: tuple[Probe, ...] = (
-    VersionNegotiation(),
-    CapabilitiesHonesty(),
-    RequiredHeaders(),
-    UnknownMethod(),
-    TokenExpired(),
-    SessionExpiredNot404(),
-    SessionExpiredEmptySuccess(),
-    ResumeGap(),
-    ReconnectFails(),
-)
+def probes() -> tuple[Probe, ...]:
+    from mcp_cross_exam.probes.base import registered_instances
+
+    return registered_instances()
 
 
 def _ticket_params() -> dict[str, JsonValue]:

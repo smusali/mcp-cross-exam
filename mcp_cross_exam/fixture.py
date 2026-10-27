@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 import sys
+import time
 from collections.abc import Awaitable, Callable, MutableMapping
 from dataclasses import dataclass
 
@@ -323,9 +324,15 @@ def _call(
     http: bool,
 ) -> Reply:
     name = params.get("name")
+    arguments = params.get("arguments")
+    if name == "list_tickets":
+        return _result_reply(rpc_id, _ticket_list())
+    if name == "slow_report":
+        return _slow_report(rpc_id, arguments)
+    if name == "create_ticket":
+        return _result_reply(rpc_id, _created())
     if name != "get_ticket":
         return _error_reply(rpc_id, 200, INVALID_PARAMS, "Unknown tool")
-    arguments = params.get("arguments")
     if isinstance(arguments, dict) and arguments.get("stream") is True:
         if http:
             first, second = _stream(state)
@@ -358,8 +365,43 @@ def _empty_result() -> dict[str, JsonValue]:
     return {"content": [], "isError": False}
 
 
+def _ticket_list() -> dict[str, JsonValue]:
+    return {
+        "content": [{"type": "text", "text": "ticket-1"}],
+        "structuredContent": {"tickets": ["ticket-1"]},
+        "isError": False,
+    }
+
+
+def _created() -> dict[str, JsonValue]:
+    return {
+        "content": [{"type": "text", "text": "created"}],
+        "structuredContent": {"id": "ticket-created"},
+        "isError": False,
+    }
+
+
+def _delay(arguments: JsonValue) -> float:
+    if not isinstance(arguments, dict):
+        return 0.0
+    raw = arguments.get("delay")
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return 0.0
+    return min(float(raw), 30.0)
+
+
+def _slow_report(rpc_id: JsonValue | None, arguments: JsonValue) -> Reply:
+    delay = _delay(arguments)
+    if delay > 0:
+        time.sleep(delay)
+    return _result_reply(
+        rpc_id,
+        {"content": [{"type": "text", "text": "ok"}], "isError": False},
+    )
+
+
 def _tools_result() -> dict[str, JsonValue]:
-    tool: dict[str, JsonValue] = {
+    ticket: dict[str, JsonValue] = {
         "name": "get_ticket",
         "description": "Read a ticket.",
         "inputSchema": {"type": "object", "properties": {"stream": {"type": "boolean"}}},
@@ -370,8 +412,25 @@ def _tools_result() -> dict[str, JsonValue]:
         },
         "annotations": {"readOnlyHint": True, "destructiveHint": False},
     }
+    listed: dict[str, JsonValue] = {
+        "name": "list_tickets",
+        "description": "List tickets.",
+        "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {"readOnlyHint": True},
+    }
+    slow: dict[str, JsonValue] = {
+        "name": "slow_report",
+        "description": "Read a slow report.",
+        "inputSchema": {"type": "object", "properties": {"delay": {"type": "number"}}},
+        "annotations": {"readOnlyHint": True},
+    }
+    created: dict[str, JsonValue] = {
+        "name": "create_ticket",
+        "description": "Create a ticket.",
+        "inputSchema": {"type": "object", "properties": {}},
+    }
     return {
-        "tools": [tool],
+        "tools": [ticket, listed, slow, created],
         "resultType": "complete",
         "ttlMs": 0,
         "cacheScope": "private",

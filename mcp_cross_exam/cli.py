@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
-import tempfile
+import uuid
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, NoReturn
 from urllib.parse import urlsplit
@@ -15,6 +16,20 @@ import typer
 from rich.console import Console
 
 from mcp_cross_exam import version_facts
+from mcp_cross_exam.config import (
+    ConfigError,
+    Settings,
+    dump_settings,
+    init_document,
+    load_settings,
+)
+from mcp_cross_exam.evidence import (
+    expected_payload,
+    request_method,
+    request_params,
+    sweep_tree,
+    transcript_pairs,
+)
 from mcp_cross_exam.exit_codes import ExitCode, exit_with, set_exit_zero
 from mcp_cross_exam.fixture import (
     EXPIRED_TOKEN,
@@ -26,8 +41,23 @@ from mcp_cross_exam.fixture import (
     serve_http,
     serve_stdio,
 )
-from mcp_cross_exam.probes import ProbeContext, examine
-from mcp_cross_exam.transport import OFFERED_VERSIONS, Transport, TransportFailure
+from mcp_cross_exam.guard import TargetDecision, decide
+from mcp_cross_exam.probes.base import Probe, ProbeContext, RunBudget
+from mcp_cross_exam.runner import (
+    BUDGET_SKIP,
+    SelectionError,
+    UnknownTool,
+    classify_listed,
+    examine,
+    list_payload,
+    list_text,
+    load_probes,
+    plan_lines,
+    select_probes,
+    write_result,
+)
+from mcp_cross_exam.transport import OFFERED_VERSIONS, RunContext, Transport, TransportFailure
+from mcp_cross_exam.transport.base import JsonValue
 from mcp_cross_exam.transport.http import open_http
 from mcp_cross_exam.transport.stdio import open_stdio
 
@@ -60,8 +90,20 @@ class Flags:
     header_env: tuple[str, ...] = ()
     ca_bundle: str | None = None
     protocol_version: str | None = None
+    probe: tuple[str, ...] = ()
+    family: tuple[str, ...] = ()
+    skip: tuple[str, ...] = ()
+    seed: int | None = None
+    tool: str | None = None
+    jobs: int = 4
+    config: str | None = None
+    read_only: bool = False
+    allow_writes: bool = False
+    target_is_not_production: bool = False
+    fail_on_incomplete: bool = False
 
 
+_HELD = {"run", "fixture", "probes", "config", "replay"}
 _stdio_command: ContextVar[tuple[str, ...] | None] = ContextVar("stdio_command", default=None)
 
 
@@ -75,6 +117,13 @@ _VALUE_OPTIONS = {
     "--header-env",
     "--ca-bundle",
     "--protocol-version",
+    "--probe",
+    "--family",
+    "--skip",
+    "--seed",
+    "--tool",
+    "--jobs",
+    "--config",
 }
 
 
@@ -86,7 +135,7 @@ def split_stdio(argv: list[str]) -> tuple[list[str], tuple[str, ...] | None]:
 
 
 def route(argv: list[str]) -> list[str]:
-    if not argv or "run" in argv or "fixture" in argv or argv in (["-h"], ["--help"]):
+    if not argv or any(token in _HELD for token in argv) or argv in (["-h"], ["--help"]):
         return argv
     routed: list[str] = []
     index = 0
@@ -189,7 +238,32 @@ def _combine(parent: Flags | None, local: Flags) -> Flags:
         header_env=parent.header_env + local.header_env,
         ca_bundle=_merge(parent.ca_bundle, local.ca_bundle),
         protocol_version=_merge(parent.protocol_version, local.protocol_version),
+        probe=parent.probe + local.probe,
+        family=parent.family + local.family,
+        skip=parent.skip + local.skip,
+        seed=_merge_seed(parent.seed, local.seed),
+        tool=_merge(parent.tool, local.tool),
+        jobs=_merge_jobs(parent.jobs, local.jobs),
+        config=_merge(parent.config, local.config),
+        read_only=parent.read_only or local.read_only,
+        allow_writes=parent.allow_writes or local.allow_writes,
+        target_is_not_production=parent.target_is_not_production or local.target_is_not_production,
+        fail_on_incomplete=parent.fail_on_incomplete or local.fail_on_incomplete,
     )
+
+
+def _merge_seed(left: int | None, right: int | None) -> int | None:
+    if left is not None and right is not None and left != right:
+        raise UsageFailure("conflicting flags")
+    return right if right is not None else left
+
+
+def _merge_jobs(left: int, right: int) -> int:
+    if left != right and left != 4 and right != 4:
+        raise UsageFailure("conflicting flags")
+    if right != 4:
+        return right
+    return left
 
 
 def _is_empty(flags: Flags, endpoint: str | None, command: tuple[str, ...] | None) -> bool:
@@ -205,6 +279,17 @@ def _is_empty(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         and not flags.header_env
         and flags.ca_bundle is None
         and flags.protocol_version is None
+        and not flags.probe
+        and not flags.family
+        and not flags.skip
+        and flags.seed is None
+        and flags.tool is None
+        and flags.jobs == 4
+        and flags.config is None
+        and not flags.read_only
+        and not flags.allow_writes
+        and not flags.target_is_not_production
+        and not flags.fail_on_incomplete
         and not flags.version
         and not flags.as_json
         and not flags.quiet
@@ -249,6 +334,8 @@ def _validate(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         raise UsageFailure("ca bundle not found")
     if flags.cwd is not None and not Path(flags.cwd).is_dir():
         raise UsageFailure("cwd not found")
+    if flags.jobs < 1:
+        raise UsageFailure("jobs must be at least 1")
 
 
 def _env_value(name: str) -> str:
@@ -324,31 +411,28 @@ def _open_transport(
     )
 
 
-async def _audit(
-    flags: Flags,
-    endpoint: str | None,
-    command: tuple[str, ...] | None,
-) -> ExitCode:
-    run_dir = Path(tempfile.mkdtemp(prefix="mcp-cross-exam-"))
-    transport = _open_transport(flags, endpoint, command, run_dir)
+async def _audit(chosen: Chosen) -> ExitCode:
+    flags = chosen.flags
+    run_id = uuid.uuid4().hex
+    seed = flags.seed if flags.seed is not None else _derive_seed(run_id)
+    run_dir = runs_root() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    secrets = _secrets(flags)
+    transport = _open_transport(flags, chosen.endpoint, chosen.command, run_dir)
     try:
         context = await transport.connect()
-        expired = (
-            _env_value(flags.expired_bearer_env) if flags.expired_bearer_env is not None else None
-        )
-        url = flags.sse if flags.sse is not None else endpoint
-        context.findings.extend(
-            await examine(
-                ProbeContext(
-                    transport=transport,
-                    run=context,
-                    http=command is None,
-                    endpoint=url,
-                    expired_bearer=expired,
-                    legacy=flags.sse is not None,
-                )
-            )
-        )
+        context.guard = chosen.decision.guard
+        context.seed = seed
+        context.run_id = run_id
+        probe_ctx = _probe_context(chosen, transport, context, seed, secrets)
+        if chosen.plan:
+            await classify_listed(probe_ctx)
+            for line in plan_lines(probe_ctx, chosen.probes):
+                print(line)
+            write_result(probe_ctx, context.findings, chosen.probes)
+            return ExitCode.SUCCESS
+        context.findings.extend(await examine(probe_ctx, chosen.probes))
+        write_result(probe_ctx, context.findings, chosen.probes)
         if not flags.quiet:
             console = console_for(no_color=flags.no_color)
             for finding in context.findings:
@@ -356,32 +440,46 @@ async def _audit(
                     f"{finding.severity} {finding.item_id}: {finding.summary}",
                     highlight=False,
                 )
+        if flags.fail_on_incomplete and any(item.reason == BUDGET_SKIP for item in context.skips):
+            return ExitCode.CONFIG
         if any(item.severity in {"medium", "high"} for item in context.findings):
             return ExitCode.FINDINGS
         return ExitCode.SUCCESS
     finally:
         await transport.close()
+        sweep_tree(run_dir, secrets)
 
 
 def execute(
     flags: Flags,
     endpoint: str | None,
     command: tuple[str, ...] | None,
+    *,
+    plan: bool = False,
 ) -> None:
     set_exit_zero(flags.exit_zero)
     if flags.version:
         emit_version(as_json=flags.as_json)
         exit_with(ExitCode.SUCCESS)
+    console = console_for(no_color=flags.no_color)
     try:
-        _validate(flags, endpoint, command)
-    except UsageFailure as exc:
-        console_for(no_color=flags.no_color).print(str(exc), highlight=False)
+        chosen = _prepare(flags, endpoint, command, plan=plan)
+    except (UsageFailure, ConfigError, SelectionError) as exc:
+        console.print(str(exc), highlight=False)
         exit_with(ExitCode.CONFIG)
+    if not chosen.decision.allowed:
+        console.print(chosen.decision.reason, highlight=False)
+        exit_with(ExitCode.CONFIG)
+    if chosen.decision.guard == "overridden":
+        console.print('warning: target.guard = "overridden"', highlight=False)
     try:
-        code = anyio.run(_audit, flags, endpoint, command)
+        code = anyio.run(_audit, chosen)
     except TransportFailure as exc:
-        console_for(no_color=flags.no_color).print(str(exc), highlight=False)
+        console.print(str(exc), highlight=False)
         exit_with(ExitCode.UNREACHABLE)
+    except UnknownTool as exc:
+        console.print(f"unknown tool {exc.name}", highlight=False)
+        exit_with(ExitCode.CONFIG)
     exit_with(code)
 
 
@@ -407,6 +505,17 @@ def _flags_from(
     header_env: list[str] | None,
     ca_bundle: str | None,
     protocol_version: str | None,
+    probe: list[str] | None = None,
+    family: list[str] | None = None,
+    skip: list[str] | None = None,
+    seed: int | None = None,
+    tool: str | None = None,
+    jobs: int = 4,
+    config: str | None = None,
+    read_only: bool = False,
+    allow_writes: bool = False,
+    target_is_not_production: bool = False,
+    fail_on_incomplete: bool = False,
 ) -> Flags:
     return Flags(
         version=version,
@@ -423,7 +532,179 @@ def _flags_from(
         header_env=_tuple(header_env),
         ca_bundle=ca_bundle,
         protocol_version=protocol_version,
+        probe=_tuple(probe),
+        family=_tuple(family),
+        skip=_tuple(skip),
+        seed=seed,
+        tool=tool,
+        jobs=jobs,
+        config=config,
+        read_only=read_only,
+        allow_writes=allow_writes,
+        target_is_not_production=target_is_not_production,
+        fail_on_incomplete=fail_on_incomplete,
     )
+
+
+def runs_root() -> Path:
+    return Path.cwd() / ".mcp-cross-exam" / "runs"
+
+
+def _derive_seed(run_id: str) -> int:
+    return int.from_bytes(hashlib.sha256(run_id.encode()).digest()[:4], "big")
+
+
+@dataclass(frozen=True, slots=True)
+class Chosen:
+    flags: Flags
+    settings: Settings
+    endpoint: str | None
+    command: tuple[str, ...] | None
+    probes: tuple[Probe, ...]
+    decision: TargetDecision
+    plan: bool = False
+
+
+def _prepare(
+    flags: Flags,
+    endpoint: str | None,
+    command: tuple[str, ...] | None,
+    *,
+    plan: bool,
+    select: bool = True,
+) -> Chosen:
+    settings = load_settings(Path(flags.config) if flags.config is not None else None)
+    flags, endpoint, command = _targets(flags, settings, endpoint, command)
+    flags = _apply_file(flags, settings)
+    _validate(flags, endpoint, command)
+    probes: tuple[Probe, ...] = ()
+    if select:
+        include = flags.probe if flags.probe else tuple(settings.probes.select)
+        skip = flags.skip if flags.skip else tuple(settings.probes.skip)
+        probes = select_probes(load_probes(), include=include, families=flags.family, skip=skip)
+    decision = _decision(flags, settings, endpoint, command)
+    return Chosen(flags, settings, endpoint, command, probes, decision, plan)
+
+
+def _targets(
+    flags: Flags,
+    settings: Settings,
+    endpoint: str | None,
+    command: tuple[str, ...] | None,
+) -> tuple[Flags, str | None, tuple[str, ...] | None]:
+    if endpoint is not None or flags.sse is not None or command is not None:
+        return flags, endpoint, command
+    target = settings.target
+    if target.url and target.command:
+        raise ConfigError("target sets both url and command")
+    if target.transport == "stdio" or (target.transport is None and target.command):
+        if not target.command:
+            raise ConfigError("target command is missing")
+        return flags, None, tuple(target.command)
+    if target.transport == "sse":
+        if not target.url:
+            raise ConfigError("target url is missing")
+        return replace(flags, sse=target.url), None, None
+    if target.url:
+        return flags, target.url, None
+    return flags, None, None
+
+
+def _apply_file(flags: Flags, settings: Settings) -> Flags:
+    headers = flags.header_env
+    if not headers and settings.auth.header_env:
+        headers = tuple(f"{key}={value}" for key, value in settings.auth.header_env.items())
+    return replace(
+        flags,
+        bearer_env=flags.bearer_env or settings.auth.bearer_env,
+        expired_bearer_env=flags.expired_bearer_env or settings.auth.expired_bearer_env,
+        header_env=headers,
+        protocol_version=flags.protocol_version or settings.target.protocol_version,
+    )
+
+
+def _decision(
+    flags: Flags,
+    settings: Settings,
+    endpoint: str | None,
+    command: tuple[str, ...] | None,
+) -> TargetDecision:
+    if command is not None:
+        return decide(
+            stdio=True,
+            host=None,
+            allow=settings.target.allow,
+            override=flags.target_is_not_production,
+        )
+    url = flags.sse if flags.sse is not None else endpoint
+    host = None if url is None else urlsplit(url).hostname
+    return decide(
+        stdio=False,
+        host=host,
+        allow=settings.target.allow,
+        override=flags.target_is_not_production,
+    )
+
+
+def _probe_context(
+    chosen: Chosen,
+    transport: Transport,
+    context: RunContext,
+    seed: int,
+    secrets: tuple[str, ...],
+) -> ProbeContext:
+    flags = chosen.flags
+    expired = _env_value(flags.expired_bearer_env) if flags.expired_bearer_env is not None else None
+    url = flags.sse if flags.sse is not None else chosen.endpoint
+    effects = {
+        name: hint.effect for name, hint in chosen.settings.tools.items() if hint.effect is not None
+    }
+    budget = chosen.settings.budget
+    return ProbeContext(
+        transport=transport,
+        run=context,
+        http=chosen.command is None,
+        endpoint=url,
+        expired_bearer=expired,
+        legacy=flags.sse is not None,
+        budget=RunBudget(
+            wall_clock_s=budget.wall_clock_s,
+            max_calls_per_tool=budget.max_calls_per_tool,
+            call_timeout_s=budget.call_timeout_s,
+        ),
+        effects=effects,
+        severities=dict(chosen.settings.probes.severity),
+        guard=chosen.decision.guard,
+        seed=seed,
+        read_only=flags.read_only,
+        allow_writes=flags.allow_writes,
+        jobs=flags.jobs,
+        secrets=secrets,
+        bearer_env=flags.bearer_env,
+        expired_bearer_env=flags.expired_bearer_env,
+        header_envs=_header_envs(flags),
+        command=chosen.command,
+        only_tool=flags.tool,
+    )
+
+
+def _secrets(flags: Flags) -> tuple[str, ...]:
+    values: list[str] = []
+    if flags.bearer_env is not None:
+        values.append(_env_value(flags.bearer_env))
+    if flags.expired_bearer_env is not None:
+        values.append(_env_value(flags.expired_bearer_env))
+    values.extend(_header_values(flags).values())
+    values.extend(_child_env(flags).values())
+    return tuple(item for item in values if len(item) >= 8)
+
+
+def _header_envs(flags: Flags) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for item in flags.header_env:
+        header, env_name = item.split("=", 1)
+        headers[header] = env_name
+    return headers
 
 
 def _fail(flags: Flags, exc: UsageFailure) -> NoReturn:
@@ -469,6 +750,36 @@ def root(
         str | None,
         typer.Option("--protocol-version", help="Offer only this protocol revision."),
     ] = None,
+    probe: Annotated[
+        list[str] | None,
+        typer.Option("--probe", help="Run probes whose ids match this glob."),
+    ] = None,
+    family: Annotated[
+        list[str] | None, typer.Option("--family", help="Run probes in this family.")
+    ] = None,
+    skip: Annotated[list[str] | None, typer.Option("--skip", help="Skip this probe id.")] = None,
+    seed: Annotated[int | None, typer.Option("--seed", help="Seed the run.")] = None,
+    tool: Annotated[str | None, typer.Option("--tool", help="Limit the audit to one tool.")] = None,
+    jobs: Annotated[int, typer.Option("--jobs", help="How many tools to examine at once.")] = 4,
+    config: Annotated[str | None, typer.Option("--config", help="Config file.")] = None,
+    read_only: Annotated[
+        bool, typer.Option("--read-only", help="Skip write and destructive calls.")
+    ] = False,
+    allow_writes: Annotated[
+        bool,
+        typer.Option("--allow-writes", help="Allow writes when the guard is overridden."),
+    ] = False,
+    target_is_not_production: Annotated[
+        bool,
+        typer.Option(
+            "--target-is-not-production",
+            help="Audit an allow-listed host that is not production.",
+        ),
+    ] = False,
+    fail_on_incomplete: Annotated[
+        bool,
+        typer.Option("--fail-on-incomplete", help="Exit 2 when the budget skips probes."),
+    ] = False,
     version: Annotated[bool, typer.Option("--version", help="Print version facts.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable output.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-error output.")] = False,
@@ -488,6 +799,17 @@ def root(
         header_env=header_env,
         ca_bundle=ca_bundle,
         protocol_version=protocol_version,
+        probe=probe,
+        family=family,
+        skip=skip,
+        seed=seed,
+        tool=tool,
+        jobs=jobs,
+        config=config,
+        read_only=read_only,
+        allow_writes=allow_writes,
+        target_is_not_production=target_is_not_production,
+        fail_on_incomplete=fail_on_incomplete,
         version=version,
         as_json=as_json,
         quiet=quiet,
@@ -506,6 +828,12 @@ def root(
         print(ctx.get_help())
         exit_with(ExitCode.SUCCESS)
     execute(flags, endpoint, command)
+
+
+def _parent(ctx: typer.Context) -> Flags | None:
+    if isinstance(ctx.obj, Flags):
+        return ctx.obj
+    return None
 
 
 @app.command(help="Audit one MCP endpoint.")
@@ -543,6 +871,36 @@ def run(
         str | None,
         typer.Option("--protocol-version", help="Offer only this protocol revision."),
     ] = None,
+    probe: Annotated[
+        list[str] | None,
+        typer.Option("--probe", help="Run probes whose ids match this glob."),
+    ] = None,
+    family: Annotated[
+        list[str] | None, typer.Option("--family", help="Run probes in this family.")
+    ] = None,
+    skip: Annotated[list[str] | None, typer.Option("--skip", help="Skip this probe id.")] = None,
+    seed: Annotated[int | None, typer.Option("--seed", help="Seed the run.")] = None,
+    tool: Annotated[str | None, typer.Option("--tool", help="Limit the audit to one tool.")] = None,
+    jobs: Annotated[int, typer.Option("--jobs", help="How many tools to examine at once.")] = 4,
+    config: Annotated[str | None, typer.Option("--config", help="Config file.")] = None,
+    read_only: Annotated[
+        bool, typer.Option("--read-only", help="Skip write and destructive calls.")
+    ] = False,
+    allow_writes: Annotated[
+        bool,
+        typer.Option("--allow-writes", help="Allow writes when the guard is overridden."),
+    ] = False,
+    target_is_not_production: Annotated[
+        bool,
+        typer.Option(
+            "--target-is-not-production",
+            help="Audit an allow-listed host that is not production.",
+        ),
+    ] = False,
+    fail_on_incomplete: Annotated[
+        bool,
+        typer.Option("--fail-on-incomplete", help="Exit 2 when the budget skips probes."),
+    ] = False,
     version: Annotated[bool, typer.Option("--version", help="Print version facts.")] = False,
     as_json: Annotated[bool, typer.Option("--json", help="Print machine-readable output.")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", help="Suppress non-error output.")] = False,
@@ -562,13 +920,24 @@ def run(
         header_env=header_env,
         ca_bundle=ca_bundle,
         protocol_version=protocol_version,
+        probe=probe,
+        family=family,
+        skip=skip,
+        seed=seed,
+        tool=tool,
+        jobs=jobs,
+        config=config,
+        read_only=read_only,
+        allow_writes=allow_writes,
+        target_is_not_production=target_is_not_production,
+        fail_on_incomplete=fail_on_incomplete,
         version=version,
         as_json=as_json,
         quiet=quiet,
         no_color=no_color,
         exit_zero=exit_zero,
     )
-    parent = ctx.obj if isinstance(ctx.obj, Flags) else None
+    parent = _parent(ctx)
     try:
         flags = _combine(parent, local)
     except UsageFailure as exc:
@@ -630,6 +999,175 @@ def mint_token(
 ) -> None:
     print(EXPIRED_TOKEN if expired else VALID_TOKEN)
     exit_with(ExitCode.SUCCESS)
+
+
+probes_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    help="List and plan probes.",
+)
+app.add_typer(probes_app, name="probes")
+
+config_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    help="Show and write config.",
+)
+app.add_typer(config_app, name="config")
+
+
+@probes_app.command("list", help="Print the registered probes.")
+def probes_list(
+    ctx: typer.Context,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON.")] = False,
+) -> None:
+    parent = _parent(ctx)
+    rows = load_probes()
+    if as_json or (parent is not None and parent.as_json):
+        print(json.dumps(list_payload(rows)))
+    else:
+        print(list_text(rows), end="")
+    exit_with(ExitCode.SUCCESS)
+
+
+@probes_app.command("plan", help="Show which probes would run. Does not call tools.")
+def probes_plan(
+    ctx: typer.Context,
+    endpoint: Annotated[str | None, typer.Argument(help="Streamable HTTP endpoint.")] = None,
+) -> None:
+    execute(_parent(ctx) or Flags(), endpoint, _stdio_command.get(), plan=True)
+
+
+@config_app.command("show", help="Print the effective config. Secrets stay as env names.")
+def config_show(
+    ctx: typer.Context,
+    config: Annotated[str | None, typer.Option("--config", help="Config file.")] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON.")] = False,
+) -> None:
+    parent = _parent(ctx)
+    chosen = config
+    if chosen is None and parent is not None:
+        chosen = parent.config
+    use_json = as_json or (parent is not None and parent.as_json)
+    console = console_for(no_color=False if parent is None else parent.no_color)
+    try:
+        settings = load_settings(Path(chosen) if chosen is not None else None)
+    except ConfigError as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.CONFIG)
+    payload = dump_settings(settings)
+    print(json.dumps(payload, indent=None if use_json else 2, sort_keys=True))
+    exit_with(ExitCode.SUCCESS)
+
+
+@config_app.command("init", help="Write a commented config from tools/list.")
+def config_init(
+    ctx: typer.Context,
+    endpoint: Annotated[str | None, typer.Argument(help="Streamable HTTP endpoint.")] = None,
+) -> None:
+    flags = _parent(ctx) or Flags()
+    destination = Path.cwd() / "mcp-cross-exam.toml"
+    console = console_for(no_color=flags.no_color)
+    if destination.exists():
+        console.print("config already exists", highlight=False)
+        exit_with(ExitCode.CONFIG)
+    try:
+        chosen = _prepare(flags, endpoint, _stdio_command.get(), plan=False, select=False)
+    except (UsageFailure, ConfigError, SelectionError) as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.CONFIG)
+    if not chosen.decision.allowed:
+        console.print(chosen.decision.reason, highlight=False)
+        exit_with(ExitCode.CONFIG)
+    try:
+        anyio.run(_write_config, chosen, destination)
+    except TransportFailure as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.UNREACHABLE)
+    except UnknownTool as exc:
+        console.print(f"unknown tool {exc.name}", highlight=False)
+        exit_with(ExitCode.CONFIG)
+    exit_with(ExitCode.SUCCESS)
+
+
+@app.command("replay", help="Send a transcript and diff the result bodies.")
+def replay_cmd(
+    ctx: typer.Context,
+    transcript: Annotated[str, typer.Argument(help="JSON-RPC JSONL transcript.")],
+    endpoint: Annotated[str, typer.Argument(help="Streamable HTTP endpoint.")],
+) -> None:
+    flags = _parent(ctx) or Flags()
+    console = console_for(no_color=flags.no_color)
+    path = Path(transcript)
+    try:
+        pairs = transcript_pairs(path.read_text(encoding="utf-8"))
+        chosen = _prepare(flags, endpoint, None, plan=False, select=False)
+    except (OSError, ValueError, UsageFailure, ConfigError, SelectionError) as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.CONFIG)
+    if not chosen.decision.allowed:
+        console.print(chosen.decision.reason, highlight=False)
+        exit_with(ExitCode.CONFIG)
+    try:
+        code = anyio.run(_replay, chosen, pairs)
+    except TransportFailure as exc:
+        console.print(str(exc), highlight=False)
+        exit_with(ExitCode.UNREACHABLE)
+    exit_with(code)
+
+
+async def _write_config(chosen: Chosen, destination: Path) -> None:
+    flags = chosen.flags
+    run_id = uuid.uuid4().hex
+    run_dir = runs_root() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    secrets = _secrets(flags)
+    transport = _open_transport(flags, chosen.endpoint, chosen.command, run_dir)
+    try:
+        context = await transport.connect()
+        context.guard = chosen.decision.guard
+        probe_ctx = _probe_context(chosen, transport, context, flags.seed or 0, secrets)
+        await classify_listed(probe_ctx)
+        tools = [(item.tool.name, item.effect, item.source) for item in probe_ctx.classifications]
+        destination.write_text(init_document(tools), encoding="utf-8")
+    finally:
+        await transport.close()
+        sweep_tree(run_dir, secrets)
+
+
+async def _replay(
+    chosen: Chosen,
+    pairs: list[tuple[dict[str, JsonValue], dict[str, JsonValue] | None]],
+) -> ExitCode:
+    flags = chosen.flags
+    endpoint = chosen.endpoint
+    if endpoint is None:
+        return ExitCode.CONFIG
+    run_id = uuid.uuid4().hex
+    run_dir = runs_root() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    secrets = _secrets(flags)
+    transport = _open_transport(flags, endpoint, None, run_dir)
+    console = console_for(no_color=flags.no_color)
+    try:
+        await transport.connect()
+        for request, expected in pairs:
+            method = request_method(request)
+            if method is None:
+                console.print("transcript line is not a request", highlight=False)
+                return ExitCode.FINDINGS
+            actual = await transport.request(method, request_params(request))
+            if expected is None:
+                continue
+            if actual != expected_payload(expected):
+                console.print(f"{method} differed", highlight=False)
+                return ExitCode.FINDINGS
+        return ExitCode.SUCCESS
+    finally:
+        await transport.close()
+        sweep_tree(run_dir, secrets)
 
 
 def _fixture_fail(message: str) -> NoReturn:
