@@ -17,6 +17,7 @@ from mcp_cross_exam.fixture import (
     VALID_TOKEN,
     FixtureApp,
     FixtureState,
+    Reply,
 )
 from mcp_cross_exam.probes import examine, is_empty_success
 from mcp_cross_exam.probes.base import Observation, Probe, ProbeContext, ToolView
@@ -127,9 +128,58 @@ def test_expire_hook_keeps_evidence_in_order(tmp_path: Path) -> None:
 
 
 def test_expire_hook_refuses_a_remote_client() -> None:
-    allowed, refused = anyio.run(_control_hosts)
+    allowed, refused, reset_allowed, reset_refused = anyio.run(_control_hosts)
     assert allowed == 200
     assert refused == 403
+    assert reset_allowed == 200
+    assert reset_refused == 403
+
+
+def test_negative_token_ttl_is_config() -> None:
+    with pytest.raises(SystemExit) as caught:
+        main(["fixture", "serve", "--stdio", "--token-ttl-s", "-1"])
+    assert caught.value.code == ExitCode.CONFIG
+
+
+def test_zero_token_ttl_expires_immediately() -> None:
+    state = FixtureState(
+        "2025-11-25",
+        frozenset(),
+        token="http",
+        token_ttl_s=0,
+        clock=lambda: 1.0,
+    )
+    assert _bearer_reply(state).status == 401
+
+
+def test_lapsed_bearer_is_an_empty_success_when_that_defect_is_on() -> None:
+    state = FixtureState(
+        "2025-11-25",
+        frozenset({"session.token-expired-empty-success"}),
+        token="http",
+        token_ttl_s=0,
+        clock=lambda: 1.0,
+    )
+    reply = _bearer_reply(state)
+    assert reply.status == 200
+    assert b'"content": []' in reply.body
+
+
+def test_reset_restarts_the_token_clock() -> None:
+    times = [0.0]
+
+    def clock() -> float:
+        return times[0]
+
+    app = FixtureApp("2025-11-25", frozenset(), token_ttl_s=5)
+    app.state.clock = clock
+    app.state.issued_at = 0.0
+    app.state.events.append(("1", b"{}"))
+    times[0] = 5.0
+    assert _bearer_reply(app.state).status == 401
+    assert anyio.run(_post, app, ("127.0.0.1", 9), "/__fixture/reset") == 200
+    assert app.state.events == []
+    assert _bearer_reply(app.state).status == 200
 
 
 def test_mint_token_command(capsys: pytest.CaptureFixture[str]) -> None:
@@ -332,14 +382,34 @@ def _schema() -> dict[str, JsonValue]:
     return loaded
 
 
-async def _control_hosts() -> tuple[int, int]:
+def _bearer_reply(state: FixtureState) -> Reply:
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "get_ticket", "arguments": {}},
+        }
+    ).encode()
+    return state.answer(
+        body,
+        {"authorization": f"Bearer {VALID_TOKEN}", "mcp-protocol-version": state.era},
+        http=True,
+        origin="http://127.0.0.1:9",
+        require_session=False,
+    )
+
+
+async def _control_hosts() -> tuple[int, int, int, int]:
     app = FixtureApp("2025-11-25", frozenset())
-    allowed = await _post(app, ("127.0.0.1", 9))
-    refused = await _post(app, ("8.8.8.8", 9))
-    return allowed, refused
+    allowed = await _post(app, ("127.0.0.1", 9), "/__fixture/expire-session")
+    refused = await _post(app, ("8.8.8.8", 9), "/__fixture/expire-session")
+    reset_allowed = await _post(app, ("127.0.0.1", 9), "/__fixture/reset")
+    reset_refused = await _post(app, ("8.8.8.8", 9), "/__fixture/reset")
+    return allowed, refused, reset_allowed, reset_refused
 
 
-async def _post(app: FixtureApp, client: tuple[str, int]) -> int:
+async def _post(app: FixtureApp, client: tuple[str, int], path: str) -> int:
     sent = False
     status = 0
 
@@ -363,8 +433,8 @@ async def _post(app: FixtureApp, client: tuple[str, int]) -> int:
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
         "method": "POST",
-        "path": "/__fixture/expire-session",
-        "raw_path": b"/__fixture/expire-session",
+        "path": path,
+        "raw_path": path.encode(),
         "query_string": b"",
         "headers": [],
         "scheme": "http",

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import os
 import sys
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, MutableMapping
 from contextlib import suppress
+from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -756,16 +758,56 @@ async def _reap(tmp_path: Path) -> None:
         group.cancel_scope.cancel()
     await transport.close()
     parent_text, child_text = pidfile.read_text(encoding="utf-8").splitlines()
-    assert not _alive(int(parent_text))
-    assert not _alive(int(child_text))
+    parent = int(parent_text)
+    child = int(child_text)
+    if sys.platform == "win32":
+        with anyio.move_on_after(2):
+            while _alive(parent) or _alive(child):
+                await anyio.sleep(0.05)
+    assert not _alive(parent)
+    assert not _alive(child)
 
 
 def _alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        return _windows_alive(pid)
     try:
         os.kill(pid, 0)
     except OSError:
         return False
     return True
+
+
+def _windows_alive(pid: int) -> bool:
+    process_query_limited_information = 0x1000
+    still_active = 259
+    error_access_denied = 5
+    kernel32 = _windows_kernel32()
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.GetLastError.argtypes = ()
+    kernel32.GetLastError.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        last_error: int = kernel32.GetLastError()
+        return last_error == error_access_denied
+    code = wintypes.DWORD()
+    try:
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _windows_kernel32() -> ctypes.CDLL:
+    load = getattr(ctypes, "WinDLL", ctypes.CDLL)
+    library: ctypes.CDLL = load("kernel32")
+    return library
 
 
 def test_stdio_usage_and_http_usage_never_connect(
