@@ -675,15 +675,16 @@ async def _pollution(tmp_path: Path) -> None:
     assert "ready" in context.logs.path.read_text(encoding="utf-8")
 
 
-def test_pollution_exits_findings_unless_exit_zero(tmp_path: Path) -> None:
+def test_pollution_stays_below_the_default_fail_on(tmp_path: Path) -> None:
     script = tmp_path / "server.py"
     _stdio_script(script, noise=True)
-    noisy = _invoke(["--", sys.executable, str(script)])
-    quiet = _invoke(["--quiet", "--", sys.executable, str(script)])
-    held = _invoke(["--exit-zero", "--", sys.executable, str(script)])
-    assert noisy.exit_code == ExitCode.FINDINGS
+    args = ["--skip", "transport.version-negotiation", "--", sys.executable, str(script)]
+    noisy = _invoke(args)
+    quiet = _invoke(["--quiet", *args])
+    held = _invoke(["--exit-zero", *args])
+    assert noisy.exit_code == ExitCode.SUCCESS
     assert "transport.stdout-pollution" in noisy.stderr
-    assert quiet.exit_code == ExitCode.FINDINGS
+    assert quiet.exit_code == ExitCode.SUCCESS
     assert "transport.stdout-pollution" not in quiet.stderr
     assert held.exit_code == ExitCode.SUCCESS
 

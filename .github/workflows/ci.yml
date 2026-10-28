@@ -34,6 +34,10 @@ jobs:
       - name: Install
         run: uv sync --frozen --extra dev
 
+      - name: Install Chromium
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        run: uv run playwright install --with-deps chromium
+
       - name: Test
         run: uv run pytest
 
@@ -81,6 +85,12 @@ jobs:
 
       - name: Changelog section
         run: uv run python tools/check_changelog.py
+
+      - name: Report contract
+        run: uv run python tools/check_json_contract.py
+
+      - name: Methodology
+        run: uv run python tools/check_methodology.py
 
       - name: Action pins
         shell: bash

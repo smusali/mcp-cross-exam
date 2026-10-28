@@ -14,6 +14,18 @@ class ExitCode(IntEnum):
     INTERRUPTED = 130
 
 
+EXIT_MEANINGS: dict[ExitCode, str] = {
+    ExitCode.SUCCESS: "No findings at or above the fail-on severity",
+    ExitCode.INTERNAL: "Internal error",
+    ExitCode.CONFIG: "Usage or config error, including the production guard",
+    ExitCode.FINDINGS: "Findings at or above the fail-on severity",
+    ExitCode.UNREACHABLE: (
+        "Target unreachable, or the connection or handshake failed before any probe ran"
+    ),
+    ExitCode.INTERRUPTED: "Interrupted",
+}
+
+
 _exit_zero: ContextVar[bool] = ContextVar("exit_zero", default=False)
 
 

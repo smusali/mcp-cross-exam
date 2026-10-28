@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="{{ page.csp }}">
+<title>mcp-cross-exam score {{ page.score }}{% if page.partial %} partial{% endif %}</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --text: #1a1a1a;
+  --muted: #3f3f3f;
+  --line: #c8c8c8;
+  --card: #f4f4f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --text: #f3f3f3;
+    --muted: #d0d0d0;
+    --line: #3d3d3d;
+    --card: #1c1c1c;
+  }
+}
+body {
+  margin: 1.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  line-height: 1.45;
+}
+h1, h2, h3 { line-height: 1.25; }
+a { color: inherit; }
+.score { font-size: 1.6rem; font-weight: 700; }
+.meta, .filters { color: var(--muted); }
+.filters { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+label { display: flex; flex-direction: column; gap: 0.25rem; }
+select, button, summary { font: inherit; color: inherit; }
+button, select { background: var(--card); border: 1px solid var(--line); padding: 0.35rem 0.6rem; }
+:focus { outline: 3px solid currentColor; outline-offset: 2px; }
+article { border: 1px solid var(--line); margin: 0 0 1rem; padding: 0.75rem 1rem; }
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card);
+  color: var(--text);
+  padding: 0.75rem;
+}
+@media print {
+  :root {
+    --bg: #ffffff;
+    --text: #000000;
+    --muted: #222222;
+    --line: #555555;
+    --card: #ffffff;
+  }
+  .filters { display: none; }
+  article { break-inside: avoid; }
+  details, details > * { display: block; }
+}
+</style>
+</head>
+<body>
+<header>
+<h1>mcp-cross-exam</h1>
+<p class="score">score {{ page.score }}{% if page.partial %} partial{% endif %}</p>
+<p class="meta">{{ page.target }}</p>
+<p class="meta">revision {{ page.revision }}</p>
+<p class="meta">guard {{ page.guard }}</p>
+<p class="meta">seed {{ page.seed }}</p>
+<p class="meta">{{ page.started }} to {{ page.finished }}</p>
+<p class="meta">{{ page.budget }}</p>
+{% if page.skipped %}
+<ul>
+{% for item in page.skipped %}
+<li>{{ item }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+</header>
+<div class="filters">
+<label>Severity
+<select id="filter-severity">
+<option value="">All</option>
+{% for name in page.severities %}
+<option value="{{ name }}">{{ name }}</option>
+{% endfor %}
+</select>
+</label>
+<label>Family
+<select id="filter-family">
+<option value="">All</option>
+{% for name in page.families %}
+<option value="{{ name }}">{{ name }}</option>
+{% endfor %}
+</select>
+</label>
+<label>Tool
+<select id="filter-tool">
+<option value="">All</option>
+{% for name in page.tools %}
+<option value="{{ name }}">{{ name }}</option>
+{% endfor %}
+</select>
+</label>
+</div>
+<main>
+{% for finding in page.findings %}
+<article data-finding data-severity="{{ finding.severity }}" data-family="{{ finding.family }}" data-tool="{{ finding.tool }}">
+<details>
+<summary>
+<h2>{{ finding.severity }} {{ finding.probe_id }}{% if finding.tool %} {{ finding.tool }}{% endif %}</h2>
+</summary>
+<p>penalty {{ finding.penalty }} of {{ finding.raw_penalty }}</p>
+<p>{{ finding.title }}</p>
+{% if finding.detail %}
+<pre>{{ finding.detail }}</pre>
+{% endif %}
+{% if finding.declared is not none %}
+<h3>Declared</h3>
+<pre>{{ finding.declared }}</pre>
+<h3>Observed</h3>
+<pre>{{ finding.observed }}</pre>
+{% endif %}
+{% for exchange in finding.exchanges %}
+<h3>Request</h3>
+<pre>{{ exchange.request }}</pre>
+<h3>Response</h3>
+<pre>{{ exchange.response }}</pre>
+<p>{{ exchange.duration }} ms</p>
+{% for note in exchange.notes %}
+<p>{{ note }}</p>
+{% endfor %}
+{% endfor %}
+<h3>Reproduction</h3>
+<pre>{{ finding.repro_command }}</pre>
+<button type="button" data-command="{{ finding.repro_command }}">Copy</button>
+<h3>Blast radius</h3>
+<p>effect {{ finding.effect }} ({{ finding.effect_source }})</p>
+<p>scope {{ finding.scope }} ({{ finding.scope_source }})</p>
+<p>{{ finding.agent_impact }}</p>
+{% if finding.links %}
+<h3>Specification</h3>
+<ul>
+{% for link in finding.links %}
+<li>{% if link.href %}<a href="{{ link.href }}">{{ link.text }}</a>{% else %}{{ link.text }}{% endif %}</li>
+{% endfor %}
+</ul>
+{% endif %}
+</details>
+</article>
+{% endfor %}
+</main>
+<script>{{ page.script|safe }}</script>
+</body>
+</html>

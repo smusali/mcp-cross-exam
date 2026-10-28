@@ -201,6 +201,8 @@ def test_override_warning_and_guard(
         assert 'target.guard = "overridden"' in capsys.readouterr().err
         runs = list((tmp_path / "runs").iterdir())
         assert len(runs) == 1
-        saved = json_value(json.loads((runs[0] / "result.json").read_text(encoding="utf-8")))
+        saved = json_value(json.loads((runs[0] / "report.json").read_text(encoding="utf-8")))
         assert isinstance(saved, dict)
-        assert saved.get("guard") == "overridden"
+        target = saved.get("target")
+        assert isinstance(target, dict)
+        assert target.get("guard") == "overridden"

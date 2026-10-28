@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from random import Random
 from typing import TYPE_CHECKING, ClassVar, Literal
 
+from mcp_cross_exam.config import Scope
 from mcp_cross_exam.transport import (
     Classification,
     Finding,
@@ -107,6 +108,8 @@ class ProbeContext:
     arguments: dict[str, dict[str, JsonValue]] = field(default_factory=dict)
     observers: dict[str, str] = field(default_factory=dict)
     snapshot: str | None = None
+    scopes: dict[str, Scope] = field(default_factory=dict)
+    ran: list[str] = field(default_factory=list)
 
     @property
     def server(self) -> ServerState | None:
