@@ -1030,7 +1030,7 @@ def serve(
     defects: Annotated[
         str,
         typer.Option("--defects", help="Comma-separated probe ids, all, or none."),
-    ] = "none",
+    ] = "session.expired-empty-success,schema.undeclared-required-arg",
     clean: Annotated[bool, typer.Option("--clean", help="Enable no defects.")] = False,
     token_ttl_s: Annotated[
         float | None,

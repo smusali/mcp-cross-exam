@@ -21,14 +21,14 @@ uvx mcp-cross-exam --help
 
 ## Try it
 
-Start the local server that reproduces each finding, then audit it:
+Start the local server, then audit it. The server defaults to `session.expired-empty-success` and `schema.undeclared-required-arg`:
 
 ```sh
 mcp-cross-exam fixture serve --http 127.0.0.1:8765
 mcp-cross-exam http://127.0.0.1:8765/mcp
 ```
 
-A clean server exits 0. A server with findings exits 3 unless `--fail-on` says otherwise.
+`--clean` serves no defects, and that audit exits 0. A server with findings exits 3 unless `--fail-on` says otherwise.
 
 ## Probes
 

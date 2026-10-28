@@ -72,8 +72,8 @@
 | `--http` | Listen on `HOST:PORT` for streamable HTTP. |
 | `--sse` | Listen on `HOST:PORT` for legacy HTTP+SSE. |
 | `--era` | Protocol revision to speak. |
-| `--defects` | Comma-separated probe ids, `all`, or `none`. |
-| `--clean` | Enable no defects. |
+| `--defects` | Comma-separated probe ids, `all`, or `none`. The default is `session.expired-empty-success,schema.undeclared-required-arg`. |
+| `--clean` | Serve no defects. |
 | `--token-ttl-s` | Seconds before the valid bearer expires. |
 | `fixture mint-token --expired` | Print the expired token. |
 

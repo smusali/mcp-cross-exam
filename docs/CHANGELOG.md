@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-28
+
 ### Added
 
 - `mcp-cross-exam <endpoint>` audits one MCP server over stdio, streamable HTTP, or legacy HTTP+SSE.
@@ -16,5 +18,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each run writes a scored `report.json`, a static `report.html`, and redacted evidence.
 - `--fail-on` and documented exit codes let a CI job fail on findings.
 - `probes`, `config`, `snapshot`, and `replay` subcommands plan, configure, pin, and repeat an audit.
-- `fixture serve` starts a local server that reproduces each finding.
+- `fixture serve` defaults to the two demo findings, and `--clean` serves none.
 - PyPI releases carry provenance attestations.
