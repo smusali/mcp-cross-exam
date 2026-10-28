@@ -37,7 +37,7 @@ A clean server exits 0. A server with findings exits 3 unless `--fail-on` says o
 | Transport and session | Negotiation, headers, reconnects, stream resume, or an expired session is wrong. |
 | Schema | A tool definition, argument, error, or description does not match what the server does. |
 
-The catalog is in [Methodology](https://github.com/smusali/mcp-cross-exam/blob/main/docs/METHODOLOGY.md).
+The catalog is in [Methodology](docs/METHODOLOGY.md).
 
 ## Safety
 
@@ -47,7 +47,7 @@ Not a pentest, not a load tester, not a proxy or gateway, and not a hosted servi
 
 ## More
 
-- [Usage](https://github.com/smusali/mcp-cross-exam/blob/main/docs/USAGE.md)
-- [Methodology](https://github.com/smusali/mcp-cross-exam/blob/main/docs/METHODOLOGY.md)
-- [Changelog](https://github.com/smusali/mcp-cross-exam/blob/main/docs/CHANGELOG.md)
-- [Limitations](https://github.com/smusali/mcp-cross-exam/blob/main/docs/limitations.md)
+- [Usage](docs/USAGE.md)
+- [Methodology](docs/METHODOLOGY.md)
+- [Changelog](docs/CHANGELOG.md)
+- [Limitations](docs/limitations.md)

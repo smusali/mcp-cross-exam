@@ -66,6 +66,6 @@ Hidden-instruction lint matches steering text in a description, so a warning tha
 - [MCP transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 - [MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 - [MCP authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
-- [MCP caching](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/caching)
+- [MCP caching](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching)
 - [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750)
 - [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)
