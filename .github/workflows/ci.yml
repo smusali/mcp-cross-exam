@@ -134,7 +134,10 @@ jobs:
           fail: true
 
   security:
-    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      security-events: write
+    uses: $/.github/workflows/security.yml
 
   check:
     needs: [test, lint, package, audit, links, security]
