@@ -33,7 +33,7 @@ from mcp_cross_exam import DISTRIBUTION_NAME, __version__
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 Direction: TypeAlias = Literal["inbound", "outbound"]
-Severity: TypeAlias = Literal["info", "low", "medium", "high"]
+Severity: TypeAlias = Literal["info", "low", "medium", "high", "critical"]
 Classification: TypeAlias = Literal["read", "write", "destructive"]
 
 MODERN_VERSION = "2026-07-28"

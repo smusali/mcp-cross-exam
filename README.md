@@ -49,4 +49,4 @@ Write and destructive calls run on local and allow targets. On an overridden tar
 
 ## Status
 
-This revision is the package, the command, CI, the transport, and the transport, session, and schema probes. The fixture server can reproduce each transport, session, and schema defect.
+This revision is the package, the command, CI, the transport, the transport, session, and schema probes, and the JSON and HTML report. The fixture server can reproduce each transport, session, and schema defect.

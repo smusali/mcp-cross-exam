@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import traceback
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -13,7 +12,6 @@ from mcp_cross_exam.evidence import (
     EvidenceLog,
     build_exchanges,
     curl_for_frames,
-    redact_text,
     repro_command,
     request_method,
     request_params,
@@ -194,26 +192,6 @@ async def examine(ctx: ProbeContext, probes: Sequence[Probe] | None = None) -> l
         ctx.transport = original
         if ctx.evidence is not None:
             ctx.run.evidence_dropped = ctx.evidence.dropped
-
-
-def write_result(
-    ctx: ProbeContext,
-    findings: Sequence[Finding],
-    selected: Sequence[Probe],
-) -> None:
-    payload: dict[str, JsonValue] = {
-        "guard": ctx.run.guard,
-        "seed": ctx.seed,
-        "run_id": ctx.run.run_id,
-        "evidence_dropped": ctx.run.evidence_dropped,
-        "selected": [probe.id for probe in selected],
-        "findings": [_public(item) for item in findings],
-        "skips": [_skip_row(item) for item in ctx.run.skips],
-        "tools": [_tool_row(item) for item in ctx.classifications],
-    }
-    text = redact_text(json.dumps(payload, indent=2, sort_keys=True), ctx.secrets)
-    path = ctx.run.logs.path.parent / "result.json"
-    path.write_text(text + "\n", encoding="utf-8")
 
 
 class GuardedTransport:
@@ -403,6 +381,7 @@ async def _execute(
         if reason != "quiet":
             _skip(ctx, probe, label, reason)
         return []
+    ctx.ran.append(probe.id)
     found: list[Finding] = []
     before = tuple(ctx.transport.recorder.frames)
     try:
@@ -483,6 +462,9 @@ def _store(
 
 def _error(ctx: ProbeContext, probe: Probe, tool: ToolView | None, exc: Exception) -> Finding:
     summary = f"{probe.id} failed: {type(exc).__name__}: {exc}"
+    data: dict[str, JsonValue] = {"probe_id": probe.id}
+    if tool is not None:
+        data["tool"] = tool.name
     return Finding(
         item_id="probe.error",
         severity="medium",
@@ -490,6 +472,7 @@ def _error(ctx: ProbeContext, probe: Probe, tool: ToolView | None, exc: Exceptio
         evidence=None,
         detail=traceback.format_exc(),
         repro_command=_command(ctx, probe, tool),
+        data=data,
     )
 
 
@@ -628,30 +611,3 @@ def _exchange_id(record: Mapping[str, JsonValue]) -> str:
     if isinstance(value, str):
         return value
     return ""
-
-
-def _public(finding: Finding) -> dict[str, JsonValue]:
-    refs: list[JsonValue] = list(finding.spec_refs)
-    ids: list[JsonValue] = list(finding.exchange_ids)
-    return {
-        "id": finding.item_id,
-        "severity": finding.severity,
-        "summary": finding.summary,
-        "detail": finding.detail,
-        "classification": finding.classification,
-        "agent_impact": finding.agent_impact,
-        "spec_refs": refs,
-        "repro_command": finding.repro_command,
-        "repro_transcript": finding.repro_transcript,
-        "repro_curl": finding.repro_curl,
-        "exchange_ids": ids,
-        "data": finding.data,
-    }
-
-
-def _skip_row(item: Skip) -> dict[str, JsonValue]:
-    return {"probe_id": item.probe_id, "tool": item.tool, "reason": item.reason}
-
-
-def _tool_row(item: ClassifiedTool) -> dict[str, JsonValue]:
-    return {"name": item.tool.name, "effect": item.effect, "source": item.source}

@@ -108,14 +108,17 @@ def test_golden_repro_repeats_the_call(tmp_path: Path) -> None:
             main(["--probe", "session.expired-empty-success", url])
         assert caught.value.code == ExitCode.FINDINGS
         original = _only_run(tmp_path)
-        saved = _object((original / "result.json").read_text(encoding="utf-8"))
+        saved = _object((original / "report.json").read_text(encoding="utf-8"))
         findings = saved.get("findings")
         assert isinstance(findings, list)
         commands: list[str] = []
         for item in findings:
             if not isinstance(item, dict):
                 continue
-            command = item.get("repro_command")
+            repro = item.get("repro")
+            if not isinstance(repro, dict):
+                continue
+            command = repro.get("command")
             if isinstance(command, str):
                 commands.append(command)
         assert commands

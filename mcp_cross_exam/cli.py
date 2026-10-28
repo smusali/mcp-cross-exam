@@ -31,6 +31,7 @@ from mcp_cross_exam.evidence import (
     transcript_pairs,
 )
 from mcp_cross_exam.exit_codes import ExitCode, exit_with, set_exit_zero
+from mcp_cross_exam.findings import SEVERITY_RANK
 from mcp_cross_exam.fixture import (
     EXPIRED_TOKEN,
     VALID_TOKEN,
@@ -45,8 +46,8 @@ from mcp_cross_exam.fixture import (
 from mcp_cross_exam.guard import TargetDecision, decide
 from mcp_cross_exam.probes.base import Probe, ProbeContext, RunBudget
 from mcp_cross_exam.probes.schema import collect_definitions
+from mcp_cross_exam.report import publish, timestamp
 from mcp_cross_exam.runner import (
-    BUDGET_SKIP,
     SelectionError,
     UnknownTool,
     classify_listed,
@@ -56,7 +57,6 @@ from mcp_cross_exam.runner import (
     load_probes,
     plan_lines,
     select_probes,
-    write_result,
 )
 from mcp_cross_exam.schema_audit import write_snapshot
 from mcp_cross_exam.transport import OFFERED_VERSIONS, RunContext, Transport, TransportFailure
@@ -104,6 +104,8 @@ class Flags:
     allow_writes: bool = False
     target_is_not_production: bool = False
     fail_on_incomplete: bool = False
+    fail_on: str = "high"
+    out_dir: str | None = None
     snapshot: str | None = None
 
 
@@ -129,6 +131,8 @@ _VALUE_OPTIONS = {
     "--jobs",
     "--config",
     "--snapshot",
+    "--fail-on",
+    "--out-dir",
 }
 
 
@@ -254,6 +258,8 @@ def _combine(parent: Flags | None, local: Flags) -> Flags:
         allow_writes=parent.allow_writes or local.allow_writes,
         target_is_not_production=parent.target_is_not_production or local.target_is_not_production,
         fail_on_incomplete=parent.fail_on_incomplete or local.fail_on_incomplete,
+        fail_on=_merge_fail_on(parent.fail_on, local.fail_on),
+        out_dir=_merge(parent.out_dir, local.out_dir),
         snapshot=_merge(parent.snapshot, local.snapshot),
     )
 
@@ -262,6 +268,14 @@ def _merge_seed(left: int | None, right: int | None) -> int | None:
     if left is not None and right is not None and left != right:
         raise UsageFailure("conflicting flags")
     return right if right is not None else left
+
+
+def _merge_fail_on(left: str, right: str) -> str:
+    if left != right and left != "high" and right != "high":
+        raise UsageFailure("conflicting flags")
+    if right != "high":
+        return right
+    return left
 
 
 def _merge_jobs(left: int, right: int) -> int:
@@ -345,6 +359,10 @@ def _validate(flags: Flags, endpoint: str | None, command: tuple[str, ...] | Non
         raise UsageFailure("jobs must be at least 1")
     if flags.snapshot is not None and not Path(flags.snapshot).is_file():
         raise UsageFailure("snapshot not found")
+    if flags.fail_on not in SEVERITY_RANK:
+        raise UsageFailure("unsupported fail-on severity")
+    if flags.out_dir is not None and not flags.out_dir.strip():
+        raise UsageFailure("out dir is empty")
 
 
 def _env_value(name: str) -> str:
@@ -374,9 +392,11 @@ def _header_values(flags: Flags) -> dict[str, str]:
     return headers
 
 
-def console_for(*, no_color: bool) -> Console:
+def console_for(*, no_color: bool, width: int | None = None) -> Console:
     forced = no_color or os.environ.get("NO_COLOR") is not None
-    return Console(stderr=True, no_color=forced)
+    if width is None:
+        return Console(stderr=True, no_color=forced)
+    return Console(stderr=True, no_color=forced, width=width, highlight=False)
 
 
 def emit_version(*, as_json: bool) -> None:
@@ -424,9 +444,10 @@ async def _audit(chosen: Chosen) -> ExitCode:
     flags = chosen.flags
     run_id = uuid.uuid4().hex
     seed = flags.seed if flags.seed is not None else _derive_seed(run_id)
-    run_dir = runs_root() / run_id
+    run_dir = Path(flags.out_dir) if flags.out_dir else runs_root() / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     secrets = _secrets(flags)
+    started = timestamp()
     transport = _open_transport(flags, chosen.endpoint, chosen.command, run_dir)
     try:
         context = await transport.connect()
@@ -434,26 +455,41 @@ async def _audit(chosen: Chosen) -> ExitCode:
         context.seed = seed
         context.run_id = run_id
         probe_ctx = _probe_context(chosen, transport, context, seed, secrets)
+        console = console_for(no_color=flags.no_color, width=100)
         if chosen.plan:
             await classify_listed(probe_ctx)
             for line in plan_lines(probe_ctx, chosen.probes):
                 print(line)
-            write_result(probe_ctx, context.findings, chosen.probes)
+            publish(
+                probe_ctx,
+                context.findings,
+                directory=run_dir,
+                started_at=started,
+                finished_at=timestamp(),
+                protocol_version=flags.protocol_version,
+                fail_on=flags.fail_on,
+                fail_on_incomplete=flags.fail_on_incomplete,
+                as_json=False,
+                quiet=True,
+                plan=True,
+                console=console,
+            )
             return ExitCode.SUCCESS
         context.findings.extend(await examine(probe_ctx, chosen.probes))
-        write_result(probe_ctx, context.findings, chosen.probes)
-        if not flags.quiet:
-            console = console_for(no_color=flags.no_color)
-            for finding in context.findings:
-                console.print(
-                    f"{finding.severity} {finding.item_id}: {finding.summary}",
-                    highlight=False,
-                )
-        if flags.fail_on_incomplete and any(item.reason == BUDGET_SKIP for item in context.skips):
-            return ExitCode.CONFIG
-        if any(item.severity in {"medium", "high"} for item in context.findings):
-            return ExitCode.FINDINGS
-        return ExitCode.SUCCESS
+        return publish(
+            probe_ctx,
+            context.findings,
+            directory=run_dir,
+            started_at=started,
+            finished_at=timestamp(),
+            protocol_version=flags.protocol_version,
+            fail_on=flags.fail_on,
+            fail_on_incomplete=flags.fail_on_incomplete,
+            as_json=flags.as_json,
+            quiet=flags.quiet,
+            plan=False,
+            console=console,
+        )
     finally:
         await transport.close()
         sweep_tree(run_dir, secrets)
@@ -525,6 +561,8 @@ def _flags_from(
     allow_writes: bool = False,
     target_is_not_production: bool = False,
     fail_on_incomplete: bool = False,
+    fail_on: str = "high",
+    out_dir: str | None = None,
     snapshot: str | None = None,
 ) -> Flags:
     return Flags(
@@ -553,6 +591,8 @@ def _flags_from(
         allow_writes=allow_writes,
         target_is_not_production=target_is_not_production,
         fail_on_incomplete=fail_on_incomplete,
+        fail_on=fail_on,
+        out_dir=out_dir,
         snapshot=snapshot,
     )
 
@@ -684,6 +724,11 @@ def _probe_context(
             call_timeout_s=budget.call_timeout_s,
         ),
         effects=effects,
+        scopes={
+            name: hint.scope
+            for name, hint in chosen.settings.tools.items()
+            if hint.scope is not None
+        },
         severities=dict(chosen.settings.probes.severity),
         guard=chosen.decision.guard,
         seed=seed,
@@ -807,8 +852,16 @@ def root(
     ] = False,
     fail_on_incomplete: Annotated[
         bool,
-        typer.Option("--fail-on-incomplete", help="Exit 2 when the budget skips probes."),
+        typer.Option("--fail-on-incomplete", help="Exit 3 when the run is partial."),
     ] = False,
+    fail_on: Annotated[
+        str,
+        typer.Option("--fail-on", help="Fail when a finding is at or above this severity."),
+    ] = "high",
+    out_dir: Annotated[
+        str | None,
+        typer.Option("--out-dir", help="Directory for the report, evidence, and transcripts."),
+    ] = None,
     snapshot: Annotated[
         str | None,
         typer.Option("--snapshot", help="Compare tool definitions with this snapshot."),
@@ -843,6 +896,8 @@ def root(
         allow_writes=allow_writes,
         target_is_not_production=target_is_not_production,
         fail_on_incomplete=fail_on_incomplete,
+        fail_on=fail_on,
+        out_dir=out_dir,
         snapshot=snapshot,
         version=version,
         as_json=as_json,
@@ -933,8 +988,16 @@ def run(
     ] = False,
     fail_on_incomplete: Annotated[
         bool,
-        typer.Option("--fail-on-incomplete", help="Exit 2 when the budget skips probes."),
+        typer.Option("--fail-on-incomplete", help="Exit 3 when the run is partial."),
     ] = False,
+    fail_on: Annotated[
+        str,
+        typer.Option("--fail-on", help="Fail when a finding is at or above this severity."),
+    ] = "high",
+    out_dir: Annotated[
+        str | None,
+        typer.Option("--out-dir", help="Directory for the report, evidence, and transcripts."),
+    ] = None,
     snapshot: Annotated[
         str | None,
         typer.Option("--snapshot", help="Compare tool definitions with this snapshot."),
@@ -969,6 +1032,8 @@ def run(
         allow_writes=allow_writes,
         target_is_not_production=target_is_not_production,
         fail_on_incomplete=fail_on_incomplete,
+        fail_on=fail_on,
+        out_dir=out_dir,
         snapshot=snapshot,
         version=version,
         as_json=as_json,
