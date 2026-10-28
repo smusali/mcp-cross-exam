@@ -495,7 +495,7 @@ def snapshot_text(document: Mapping[str, JsonValue]) -> str:
 
 
 def write_snapshot(path: Path, tools: Sequence[Mapping[str, JsonValue]]) -> None:
-    path.write_text(snapshot_text(snapshot_document(tools)), encoding="utf-8")
+    path.write_text(snapshot_text(snapshot_document(tools)), encoding="utf-8", newline="\n")
 
 
 def load_snapshot(path: Path) -> dict[str, JsonValue]:

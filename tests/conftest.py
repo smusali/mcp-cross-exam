@@ -9,11 +9,23 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+import typer
+from typer.testing import CliRunner
+
+from mcp_cross_exam.cli import app, bind_stdio, release_stdio
 
 
 @pytest.fixture(autouse=True)
 def _runs_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MCP_CROSS_EXAM_RUNS", str(tmp_path / "runs"))
+
+
+def invoke_cli(argv: list[str]) -> typer.testing.Result:
+    left, token = bind_stdio(argv)
+    try:
+        return CliRunner().invoke(app, left)
+    finally:
+        release_stdio(token)
 
 
 def free_port() -> int:

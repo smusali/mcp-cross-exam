@@ -46,10 +46,10 @@ from mcp_cross_exam.transport import Finding, Frame
 from mcp_cross_exam.transport.base import JsonValue
 from mcp_cross_exam.transport.http import open_http
 from mcp_cross_exam.transport.stdio import open_stdio
+from tests.conftest import invoke_cli as _invoke
 from tests.conftest import start_fixture
 from tests.probes.conftest import finding_ids
 from tests.support.asgi import StreamingASGITransport
-from tests.support.invoke import invoke as _invoke
 
 ROOT = Path(__file__).resolve().parents[2]
 CORPUS = ROOT / "tests" / "data"

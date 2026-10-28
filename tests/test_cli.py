@@ -8,22 +8,13 @@ from pathlib import Path
 import jsonschema
 import pytest
 import typer
-from typer.testing import CliRunner
 
 from mcp_cross_exam import __version__
-from mcp_cross_exam.cli import app, bind_stdio, exit_code_for, main, release_stdio
+from mcp_cross_exam.cli import exit_code_for, main
 from mcp_cross_exam.exit_codes import ExitCode, exit_with, set_exit_zero
+from tests.conftest import invoke_cli as _invoke
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = CliRunner()
-
-
-def _invoke(argv: list[str]) -> typer.testing.Result:
-    left, token = bind_stdio(argv)
-    try:
-        return RUNNER.invoke(app, left)
-    finally:
-        release_stdio(token)
 
 
 def test_streamable_http_and_run_alias() -> None:

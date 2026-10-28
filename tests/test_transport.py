@@ -12,14 +12,12 @@ from pathlib import Path
 
 import anyio
 import pytest
-import typer
 from mcp.server.mcpserver import MCPServer
 from mcp.shared.exceptions import MCPError
 from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 from pydantic import ValidationError
-from typer.testing import CliRunner
 
-from mcp_cross_exam.cli import app, bind_stdio, main, release_stdio
+from mcp_cross_exam.cli import main
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.transport.base import (
     ConnectFailed,
@@ -37,9 +35,9 @@ from mcp_cross_exam.transport.base import (
 from mcp_cross_exam.transport.http import HttpTransport, open_http, path_is_sse
 from mcp_cross_exam.transport.stdio import StdioTransport, child_environment, open_stdio
 from mcp_cross_exam.types import DataError
+from tests.conftest import invoke_cli as _invoke
 from tests.support.asgi import StreamingASGITransport
 
-RUNNER = CliRunner()
 TOOLS: dict[str, object] = {
     "tools": [{"name": "echo", "inputSchema": {"type": "object"}}],
     "resultType": "complete",
@@ -51,14 +49,6 @@ SECRET = "hunter2-secret"
 Message = MutableMapping[str, object]
 Receive = Callable[[], Awaitable[Message]]
 Send = Callable[[Message], Awaitable[None]]
-
-
-def _invoke(argv: list[str]) -> typer.testing.Result:
-    left, token = bind_stdio(argv)
-    try:
-        return RUNNER.invoke(app, left)
-    finally:
-        release_stdio(token)
 
 
 def _server() -> MCPServer:
