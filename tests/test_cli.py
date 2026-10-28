@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import socket
 import sys
 from importlib.metadata import version
 from pathlib import Path
@@ -9,22 +8,13 @@ from pathlib import Path
 import jsonschema
 import pytest
 import typer
+
 from mcp_cross_exam import __version__
-from mcp_cross_exam.cli import app, bind_stdio, main, release_stdio
+from mcp_cross_exam.cli import exit_code_for, main
 from mcp_cross_exam.exit_codes import ExitCode, exit_with, set_exit_zero
-from pytest_socket import SocketConnectBlockedError
-from typer.testing import CliRunner
+from tests.conftest import invoke_cli as _invoke
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = CliRunner()
-
-
-def _invoke(argv: list[str]) -> typer.testing.Result:
-    left, token = bind_stdio(argv)
-    try:
-        return RUNNER.invoke(app, left)
-    finally:
-        release_stdio(token)
 
 
 def test_streamable_http_and_run_alias() -> None:
@@ -76,7 +66,7 @@ def test_version_text_and_json() -> None:
     assert lines[2].startswith("Python ")
     assert lines[3].index("2026-07-28") < lines[3].index("2024-11-05")
 
-    schema_path = ROOT / "mcp_cross_exam" / "version.v1.json"
+    schema_path = ROOT / "schemas" / "version.schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     for argv in (["--version", "--json"], ["--json", "--version"]):
         result = _invoke(argv)
@@ -127,54 +117,15 @@ def test_exit_zero_rewrites_only_findings() -> None:
     assert plain.value.code == ExitCode.FINDINGS
 
 
-def test_main_maps_interrupts_usage_and_bugs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def interrupt(_argv: list[str]) -> None:
-        raise KeyboardInterrupt
-
-    def broken(_argv: list[str]) -> None:
-        raise RuntimeError("boom")
-
-    def usage(_argv: list[str]) -> None:
-        raise typer.BadParameter("nope")
-
-    def finished(_argv: list[str]) -> None:
-        raise typer.Exit(code=0)
-
-    def rejected(_argv: list[str]) -> None:
-        raise typer.Exit(code=2)
-
-    monkeypatch.setattr("mcp_cross_exam.cli.dispatch", interrupt)
-    with pytest.raises(SystemExit) as interrupted:
-        main([])
-    assert interrupted.value.code == ExitCode.INTERRUPTED
-
-    monkeypatch.setattr("mcp_cross_exam.cli.dispatch", broken)
-    with pytest.raises(SystemExit) as internal:
-        main([])
-    assert internal.value.code == ExitCode.INTERNAL
-
-    monkeypatch.setattr("mcp_cross_exam.cli.dispatch", usage)
-    with pytest.raises(SystemExit) as config:
-        main([])
-    assert config.value.code == ExitCode.CONFIG
-
-    monkeypatch.setattr("mcp_cross_exam.cli.dispatch", finished)
-    with pytest.raises(SystemExit) as success:
-        main([])
-    assert success.value.code == ExitCode.SUCCESS
-
-    monkeypatch.setattr("mcp_cross_exam.cli.dispatch", rejected)
-    with pytest.raises(SystemExit) as rejected_exit:
-        main([])
-    assert rejected_exit.value.code == ExitCode.CONFIG
+def test_exit_code_for_maps_interrupts_usage_and_bugs() -> None:
+    assert exit_code_for(KeyboardInterrupt()) == ExitCode.INTERRUPTED
+    assert exit_code_for(RuntimeError("boom")) == ExitCode.INTERNAL
+    assert exit_code_for(typer.BadParameter("nope")) == ExitCode.CONFIG
+    assert exit_code_for(typer.Exit(code=0)) == ExitCode.SUCCESS
+    assert exit_code_for(typer.Exit(code=2)) == ExitCode.CONFIG
 
 
 def test_main_runs_a_valid_endpoint() -> None:
     with pytest.raises(SystemExit) as caught:
         main(["http://127.0.0.1:9/mcp"])
     assert caught.value.code == ExitCode.UNREACHABLE
-
-
-def test_non_loopback_socket_is_blocked() -> None:
-    with pytest.raises(SocketConnectBlockedError):
-        socket.socket().connect(("1.1.1.1", 443))

@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.guard import decide
 from mcp_cross_exam.transport.base import json_value
-
 from tests.conftest import start_fixture
 
 _V4 = tuple[Literal[socket.AddressFamily.AF_INET], socket.SocketKind, int, str, tuple[str, int]]
@@ -43,7 +43,8 @@ def test_loopback_literals_are_local() -> None:
 def test_mapped_loopback_is_local_and_mapped_public_is_refused() -> None:
     local = decide(stdio=False, host="mapped.example", resolve=lambda host: ("::ffff:127.0.0.1",))
     public = decide(stdio=False, host="mapped.example", resolve=lambda host: ("::ffff:8.8.8.8",))
-    assert local.allowed and local.guard == "local"
+    assert local.allowed
+    assert local.guard == "local"
     assert not public.allowed
     assert "not loopback" in public.reason
 

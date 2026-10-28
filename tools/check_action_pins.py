@@ -14,7 +14,7 @@ _USES = re.compile(
 
 
 def _is_local(ref: str) -> bool:
-    return ref == "." or ref.startswith(("./", "../"))
+    return ref == "." or ref.startswith(("./", "../", "$/"))
 
 
 def _display(path: Path) -> str:

@@ -14,21 +14,29 @@ _ALLOWED_FILES = {
     ".gitignore",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
 }
-_ALLOWED_PREFIXES = ("mcp_cross_exam/", "tests/")
+_ALLOWED_PREFIXES = (
+    "src/mcp_cross_exam/",
+    "tests/",
+    "docs/",
+    "schemas/",
+    "examples/",
+)
 _REQUIRED_URLS = (
     "https://github.com/smusali/mcp-cross-exam",
     "https://github.com/smusali/mcp-cross-exam/issues",
-    "https://github.com/smusali/mcp-cross-exam/blob/main/CHANGELOG.md",
+    "https://github.com/smusali/mcp-cross-exam/blob/main/docs/CHANGELOG.md",
+    "https://github.com/smusali/mcp-cross-exam/blob/main/docs/USAGE.md",
 )
 
 
 def _version(root: Path) -> str:
-    init = (root / "mcp_cross_exam" / "__init__.py").read_text(encoding="utf-8")
+    init = (root / "src" / "mcp_cross_exam" / "__init__.py").read_text(encoding="utf-8")
     match = _VERSION.search(init)
     if match is None:
-        print("__version__ missing from mcp_cross_exam/__init__.py", file=sys.stderr)
+        print("__version__ missing from src/mcp_cross_exam/__init__.py", file=sys.stderr)
         raise SystemExit(1)
     return match.group(1)
 
@@ -38,6 +46,12 @@ def _check_wheel(wheel: Path, version: str) -> int:
         names = archive.namelist()
         if "mcp_cross_exam/py.typed" not in names:
             print("wheel is missing mcp_cross_exam/py.typed", file=sys.stderr)
+            return 1
+        shipped = [
+            name for name in names if name.startswith("schemas/") or name.endswith(".schema.json")
+        ]
+        if shipped:
+            print("wheel ships schema files", file=sys.stderr)
             return 1
         meta_names = [name for name in names if name.endswith(".dist-info/METADATA")]
         if len(meta_names) != 1:
@@ -87,7 +101,7 @@ def _allowed(path: str) -> bool:
 def _check_sdist(sdist: Path) -> int:
     with tarfile.open(sdist) as archive:
         relative = _relative_sdist_paths(archive)
-    blocked = ("docs/", "tools/", ".github/")
+    blocked = ("tools/", ".github/")
     for path in relative:
         if path.startswith(blocked) or not _allowed(path):
             print(f"sdist contains unexpected path {path}", file=sys.stderr)

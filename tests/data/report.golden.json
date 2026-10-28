@@ -1,0 +1,79 @@
+{
+  "coverage": {
+    "probes_run": [
+      "session.expired-empty-success"
+    ],
+    "skipped": [],
+    "status": "complete"
+  },
+  "findings": [
+    {
+      "blast_radius": {
+        "agent_impact": "agent silently degrades",
+        "effect": "read",
+        "effect_source": "default",
+        "scope": "user",
+        "scope_source": "default"
+      },
+      "declared": null,
+      "detail": null,
+      "evidence": [
+        "ex-1",
+        "ex-2",
+        "ex-3"
+      ],
+      "family": "session",
+      "fingerprint": "34445e5338d96c6e8362a950caae3a0cbf743b2d8c4f60724a1d2d0a786d0f72",
+      "observed": null,
+      "penalty": 10,
+      "probe_id": "session.expired-empty-success",
+      "raw_penalty": 10,
+      "repro": {
+        "command": "mcp-cross-exam run http://fixture/mcp --probe session.expired-empty-success --seed 7 --tool get_ticket --protocol-version 2025-11-25",
+        "transcript": "{\"id\": 5, \"jsonrpc\": \"2.0\", \"method\": \"tools/call\", \"params\": {\"arguments\": {}, \"name\": \"get_ticket\"}}\n{\"id\": 5, \"jsonrpc\": \"2.0\", \"result\": {\"content\": [{\"text\": \"ticket-1\", \"type\": \"text\"}], \"isError\": false, \"structuredContent\": {\"id\": \"ticket-1\"}}}\n{\"id\": 6, \"jsonrpc\": \"2.0\", \"method\": \"tools/call\", \"params\": {\"arguments\": {}, \"name\": \"get_ticket\"}}\n{\"id\": 6, \"jsonrpc\": \"2.0\", \"result\": {\"content\": [], \"isError\": false}}\n"
+      },
+      "severity": "high",
+      "severity_source": "default",
+      "spec_refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25/basic/transports"
+      ],
+      "title": "expired session returned an empty tool result",
+      "tool": null
+    }
+  ],
+  "run": {
+    "budget": {
+      "call_timeout_s": 10.0,
+      "max_calls_per_tool": 50,
+      "wall_clock_s": 60.0
+    },
+    "seed": 7
+  },
+  "score": 90,
+  "server": {
+    "capabilities": {
+      "tools": {}
+    },
+    "extensions": [],
+    "revision": "2025-11-25",
+    "server_info": {
+      "name": "fixture",
+      "version": "1"
+    }
+  },
+  "target": {
+    "bearer_env": null,
+    "command": null,
+    "expired_bearer_env": null,
+    "guard": "local",
+    "header_env": {},
+    "protocol_version": null,
+    "transport": "http",
+    "url": "http://fixture/mcp"
+  },
+  "tool": {
+    "mcp_version": "2.3.0",
+    "name": "mcp-cross-exam",
+    "version": "0.1.0"
+  }
+}

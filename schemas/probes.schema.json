@@ -1,0 +1,46 @@
+{
+  "$defs": {
+    "ProbeRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "default_severity": {
+          "title": "Default Severity",
+          "type": "string"
+        },
+        "family": {
+          "title": "Family",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "mutates": {
+          "title": "Mutates",
+          "type": "boolean"
+        },
+        "revisions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Revisions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "family",
+        "default_severity",
+        "mutates",
+        "revisions"
+      ],
+      "title": "ProbeRecord",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/smusali/mcp-cross-exam/blob/main/schemas/probes.schema.json",
+  "items": {
+    "$ref": "#/$defs/ProbeRecord"
+  },
+  "type": "array"
+}

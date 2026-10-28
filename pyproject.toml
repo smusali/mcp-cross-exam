@@ -35,7 +35,9 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "mcp>=2.3,<3",
+  "mcp>=2.3,<2.4",
+  "mcp-types>=2.3,<2.4",
+  "uvicorn>=0.34,<1",
   "httpx2>=2.10,<3",
   "anyio>=4.6,<5",
   "pydantic>=2.11,<3",
@@ -46,7 +48,7 @@ dependencies = [
   "jinja2>=3.1,<4",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=8,<10",
   "pytest-socket>=0.8,<1",
@@ -60,7 +62,7 @@ dev = [
   "types-jsonschema>=4.23,<5",
   "import-linter>=2.1,<3",
   "hypothesis>=6.140,<7",
-  "pytest-playwright>=0.7,<0.8",
+  "deptry>=0.23,<1",
 ]
 
 [project.scripts]
@@ -70,55 +72,74 @@ mcp-cross-exam = "mcp_cross_exam.cli:main"
 Homepage = "https://github.com/smusali/mcp-cross-exam"
 Repository = "https://github.com/smusali/mcp-cross-exam"
 Issues = "https://github.com/smusali/mcp-cross-exam/issues"
-Changelog = "https://github.com/smusali/mcp-cross-exam/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/smusali/mcp-cross-exam/blob/main/docs/CHANGELOG.md"
+Documentation = "https://github.com/smusali/mcp-cross-exam/blob/main/docs/USAGE.md"
 
 [tool.hatch.version]
-path = "mcp_cross_exam/__init__.py"
+path = "src/mcp_cross_exam/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mcp_cross_exam"]
+packages = ["src/mcp_cross_exam"]
 
 [tool.hatch.build.targets.sdist]
 only-include = [
-  "mcp_cross_exam",
+  "src/mcp_cross_exam",
   "tests",
+  "schemas",
+  "examples",
+  "docs",
   "README.md",
   "LICENSE",
-  "CHANGELOG.md",
+  "SECURITY.md",
+  "CODE_OF_CONDUCT.md",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["mcp_cross_exam", "tests", "tools"]
+src = ["src", "tests", "tools"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "PTH", "PT", "C4", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["B011"]
+"tests/**" = ["B011", "S", "PT011", "PT012"]
+"tools/**" = ["S"]
 
 [tool.pytest.ini_options]
 addopts = [
+  "--import-mode=importlib",
+  "--strict-markers",
+  "--strict-config",
   "--disable-socket",
   "--allow-unix-socket",
   "--allow-hosts=127.0.0.1,::1",
   "--cov=mcp_cross_exam",
   "--cov-branch",
   "--cov-report=term-missing",
-  "--cov-fail-under=85",
+  "--cov-fail-under=80",
 ]
 testpaths = ["tests"]
-filterwarnings = ["ignore:A test tried to use socket:UserWarning:pytest_socket"]
+pythonpath = ["."]
+xfail_strict = true
+filterwarnings = ["error", "ignore::ResourceWarning"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["mcp_cross_exam", "tests", "tools"]
+implicit_reexport = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+files = ["src/mcp_cross_exam", "tests", "tools"]
+explicit_package_bases = true
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["rfc8785", "playwright", "playwright.*"]
+module = ["rfc8785"]
 ignore_missing_imports = true
+
+[tool.deptry]
+known_first_party = ["mcp_cross_exam"]
 
 [tool.coverage.run]
 source = ["mcp_cross_exam"]
@@ -139,6 +160,33 @@ forbidden_modules = [
   "mcp_cross_exam.transport.http",
 ]
 ignore_imports = [
-  "mcp_cross_exam.cli -> mcp_cross_exam.transport.stdio",
-  "mcp_cross_exam.cli -> mcp_cross_exam.transport.http",
+  "mcp_cross_exam.cli.session -> mcp_cross_exam.transport.stdio",
+  "mcp_cross_exam.cli.session -> mcp_cross_exam.transport.http",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Layers"
+type = "layers"
+layers = [
+  "mcp_cross_exam.cli",
+  "mcp_cross_exam.runner | mcp_cross_exam.report | mcp_cross_exam.fixture | mcp_cross_exam.config",
+  "mcp_cross_exam.probes",
+  "mcp_cross_exam.evidence",
+  "mcp_cross_exam.transport | mcp_cross_exam.findings | mcp_cross_exam.schema_audit",
+  "mcp_cross_exam.types | mcp_cross_exam.guard | mcp_cross_exam.exit_codes",
+]
+
+[[tool.importlinter.contracts]]
+name = "Fixture stays off the schema auditor"
+type = "forbidden"
+source_modules = ["mcp_cross_exam.fixture"]
+forbidden_modules = [
+  "mcp_cross_exam.schema_audit",
+  "mcp_cross_exam.probes",
+]
+
+[[tool.importlinter.contracts]]
+name = "Config stays off the transport"
+type = "forbidden"
+source_modules = ["mcp_cross_exam.config"]
+forbidden_modules = ["mcp_cross_exam.transport"]

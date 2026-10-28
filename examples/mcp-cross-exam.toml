@@ -1,0 +1,23 @@
+# Staging host. Loopback needs no allow entry. A remote host must be listed in allow.
+
+[target]
+# url = "https://staging.example.com/mcp"
+allow = ["staging.example.com"]
+
+[auth]
+# bearer_env = "MCP_TOKEN"
+# expired_bearer_env = "MCP_TOKEN_EXPIRED"
+# header_env = { "X-Request-Id" = "MCP_REQUEST_ID" }
+
+[probes]
+# target_tool = "echo"
+# skip = ["schema.lint.unbounded-string"]
+
+[budget]
+wall_clock_s = 60
+max_calls_per_tool = 50
+call_timeout_s = 10
+
+# [tools.echo]
+# effect = "read"
+# scope = "user"

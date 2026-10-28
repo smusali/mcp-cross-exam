@@ -9,6 +9,7 @@ import jsonschema
 import pytest
 from hypothesis import given
 from hypothesis import settings as hypothesis_settings
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.findings import (
@@ -26,10 +27,9 @@ from mcp_cross_exam.report import is_partial
 from mcp_cross_exam.runner import load_probes
 from mcp_cross_exam.transport import Finding as Draft
 from mcp_cross_exam.transport.base import JsonValue, Severity, json_value
-
 from tests.conftest import start_fixture
 
-_SCHEMA = Path(__file__).parents[1] / "mcp_cross_exam" / "report.v1.json"
+_SCHEMA = Path(__file__).parents[1] / "schemas" / "report.schema.json"
 
 
 def test_round_trip_and_fingerprint_ignore_volatile_fields() -> None:

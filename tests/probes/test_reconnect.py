@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from mcp_cross_exam.transport import Finding
 
+from mcp_cross_exam.transport import Finding
 from tests.probes.conftest import audit_http, audit_stdio, finding_ids
 
 

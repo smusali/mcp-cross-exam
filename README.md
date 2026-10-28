@@ -1,52 +1,53 @@
 # mcp-cross-exam
 
-Audit MCP servers by cross-examining them.
+Audit one MCP server and write a scored report.
 
-Built because it was needed while running MCP connectors in production. `0.1.0` is the probe set that makes that demo work, not a product.
+```mermaid
+flowchart LR
+  T["Endpoint"] --> G{"Guard"}
+  G -->|"refused"| X["Exit 2"]
+  G -->|"allowed"| C["Connect"]
+  C --> P["Run probes"]
+  P --> S["Score"]
+  S --> R["JSON and HTML"]
+```
 
-## Why this exists
-
-Five failures showed up on the wire, across time, where unit tests stay green:
-
-1. Session auth expires mid-conversation. The tool returns 200 with an empty payload and the agent silently degrades. `0.1.0` probes this.
-2. A timeout triggers a retry and the write lands twice.
-3. The tool description drifts from behavior, so the model calls the right tool with the wrong arguments and gets a plausible wrong answer. `0.1.0` probes this.
-4. PII flows into logs, traces and error strings.
-5. A tool blocks for 90 seconds with no timeout contract, and the agent has no way to cancel.
-
-## What it does
-
-`mcp-cross-exam <endpoint>` connects and cross-examines one server. Three transports are accepted:
-
-- an `http://` or `https://` URL for streamable HTTP
-- `--sse URL` for the deprecated HTTP+SSE transport
-- `-- <command> [args...]` for stdio
-
-`0.1.0` has two probe families:
-
-- Transport and session: <https://github.com/smusali/mcp-cross-exam/issues/18>
-- Schema integrity: <https://github.com/smusali/mcp-cross-exam/issues/4>
-
-`mcp-cross-exam run <endpoint>` is the same audit. `mcp-cross-exam --version` prints the tool version, the MCP SDK version, the Python version, and the protocol revisions this tool can speak.
-
-## Quick start
+## Install
 
 ```sh
-uv sync --extra dev
-mcp-cross-exam fixture serve --http 127.0.0.1:8765 --defects session.expired-empty-success
+pipx install mcp-cross-exam
+uvx mcp-cross-exam --help
+```
+
+## Try it
+
+Start the local server that reproduces each finding, then audit it:
+
+```sh
+mcp-cross-exam fixture serve --http 127.0.0.1:8765
 mcp-cross-exam http://127.0.0.1:8765/mcp
 ```
 
-## Non-goals
+A clean server exits 0. A server with findings exits 3 unless `--fail-on` says otherwise.
 
-Not a pentest. Not a load tester. Not a proxy or gateway. No hosted SaaS in v1.
+## Probes
+
+| Family | What a finding means |
+| --- | --- |
+| Transport and session | Negotiation, headers, reconnects, stream resume, or an expired session is wrong. |
+| Schema | A tool definition, argument, error, or description does not match what the server does. |
+
+The catalog is in [Methodology](docs/METHODOLOGY.md).
 
 ## Safety
 
-The runner decides whether a target is safe before it opens a socket. Stdio and a host whose every address is loopback are local. A host that matches `[target] allow` is allowed. The same allow match plus `--target-is-not-production` is recorded as overridden and prints a warning. Anything else, including a name that only contains `localhost`, is refused and the process exits 2.
+Stdio and a loopback host are local. Any other host must match `[target] allow`, and `--target-is-not-production` still needs that match. Credentials come from the environment and are redacted from the run directory.
 
-Write and destructive calls run on local and allow targets. On an overridden target they also need `--allow-writes`. `--read-only` skips them. Credentials are read from the environment and redacted from the run directory. Connection and handshake failures exit 4.
+Not a pentest, not a load tester, not a proxy or gateway, and not a hosted service.
 
-## Status
+## More
 
-This revision is the package, the command, CI, the transport, the transport, session, and schema probes, and the JSON and HTML report. The fixture server can reproduce each transport, session, and schema defect.
+- [Usage](docs/USAGE.md)
+- [Methodology](docs/METHODOLOGY.md)
+- [Changelog](docs/CHANGELOG.md)
+- [Limitations](docs/limitations.md)

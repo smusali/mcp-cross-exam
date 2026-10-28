@@ -1,0 +1,17 @@
+name: Feature
+description: A change to what the tool does.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+    validations:
+      required: true
