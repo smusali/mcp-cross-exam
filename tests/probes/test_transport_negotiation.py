@@ -9,8 +9,8 @@ import pytest
 from mcp import Client
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters
-from mcp_cross_exam import SUPPORTED_PROTOCOL_REVISIONS
 
+from mcp_cross_exam import SUPPORTED_PROTOCOL_REVISIONS
 from tests.conftest import start_fixture
 from tests.probes.conftest import audit_http, audit_stdio, finding_ids
 

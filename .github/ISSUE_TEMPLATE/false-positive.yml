@@ -1,0 +1,32 @@
+name: False positive
+description: A finding is wrong for this server.
+title: "False positive: "
+labels: ["false positive"]
+body:
+  - type: input
+    id: probe
+    attributes:
+      label: Probe id
+      placeholder: transport.reconnect-fails
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server and protocol revision
+      placeholder: example 2025-11-25
+    validations:
+      required: true
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: The finding object from report.json, with secrets removed.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is wrong
+    validations:
+      required: true

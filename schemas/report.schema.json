@@ -1,0 +1,553 @@
+{
+  "$defs": {
+    "BlastRadius": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_impact": {
+          "title": "Agent Impact",
+          "type": "string"
+        },
+        "effect": {
+          "enum": [
+            "read",
+            "write",
+            "destructive",
+            "external"
+          ],
+          "title": "Effect",
+          "type": "string"
+        },
+        "effect_source": {
+          "enum": [
+            "configured",
+            "declared",
+            "observed",
+            "default"
+          ],
+          "title": "Effect Source",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "user",
+            "tenant",
+            "global"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "scope_source": {
+          "enum": [
+            "configured",
+            "declared",
+            "observed",
+            "default"
+          ],
+          "title": "Scope Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect",
+        "effect_source",
+        "scope",
+        "scope_source",
+        "agent_impact"
+      ],
+      "title": "BlastRadius",
+      "type": "object"
+    },
+    "BudgetRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "call_timeout_s": {
+          "title": "Call Timeout S",
+          "type": "number"
+        },
+        "max_calls_per_tool": {
+          "title": "Max Calls Per Tool",
+          "type": "integer"
+        },
+        "wall_clock_s": {
+          "title": "Wall Clock S",
+          "type": "number"
+        }
+      },
+      "required": [
+        "wall_clock_s",
+        "max_calls_per_tool",
+        "call_timeout_s"
+      ],
+      "title": "BudgetRecord",
+      "type": "object"
+    },
+    "Coverage": {
+      "additionalProperties": false,
+      "properties": {
+        "probes_run": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Probes Run",
+          "type": "array"
+        },
+        "skipped": {
+          "items": {
+            "$ref": "#/$defs/SkipRecord"
+          },
+          "title": "Skipped",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "partial"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "probes_run",
+        "skipped"
+      ],
+      "title": "Coverage",
+      "type": "object"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "blast_radius": {
+          "$ref": "#/$defs/BlastRadius"
+        },
+        "declared": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Declared"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detail"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "family": {
+          "title": "Family",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "observed": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Observed"
+        },
+        "penalty": {
+          "title": "Penalty",
+          "type": "integer"
+        },
+        "probe_id": {
+          "title": "Probe Id",
+          "type": "string"
+        },
+        "raw_penalty": {
+          "title": "Raw Penalty",
+          "type": "integer"
+        },
+        "repro": {
+          "$ref": "#/$defs/Repro"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "severity_source": {
+          "enum": [
+            "default",
+            "config"
+          ],
+          "title": "Severity Source",
+          "type": "string"
+        },
+        "spec_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Spec Refs",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tool"
+        }
+      },
+      "required": [
+        "probe_id",
+        "family",
+        "tool",
+        "severity",
+        "severity_source",
+        "title",
+        "detail",
+        "declared",
+        "observed",
+        "evidence",
+        "repro",
+        "blast_radius",
+        "spec_refs",
+        "fingerprint",
+        "raw_penalty",
+        "penalty"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Repro": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "transcript": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transcript"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "Repro",
+      "type": "object"
+    },
+    "RunRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/BudgetRecord"
+        },
+        "finished_at": {
+          "title": "Finished At",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "seed",
+        "started_at",
+        "finished_at",
+        "budget"
+      ],
+      "title": "RunRecord",
+      "type": "object"
+    },
+    "ServerRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Capabilities",
+          "type": "object"
+        },
+        "extensions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Extensions",
+          "type": "array"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "string"
+        },
+        "server_info": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Server Info"
+        }
+      },
+      "required": [
+        "revision",
+        "server_info",
+        "capabilities",
+        "extensions"
+      ],
+      "title": "ServerRecord",
+      "type": "object"
+    },
+    "SkipRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "probe_id": {
+          "title": "Probe Id",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Tool"
+        }
+      },
+      "required": [
+        "probe_id",
+        "tool",
+        "reason"
+      ],
+      "title": "SkipRecord",
+      "type": "object"
+    },
+    "TargetRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "bearer_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Bearer Env"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Command"
+        },
+        "expired_bearer_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expired Bearer Env"
+        },
+        "guard": {
+          "title": "Guard",
+          "type": "string"
+        },
+        "header_env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Header Env",
+          "type": "object"
+        },
+        "protocol_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Protocol Version"
+        },
+        "transport": {
+          "enum": [
+            "http",
+            "sse",
+            "stdio"
+          ],
+          "title": "Transport",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Url"
+        }
+      },
+      "required": [
+        "transport",
+        "url",
+        "command",
+        "protocol_version",
+        "guard",
+        "bearer_env",
+        "expired_bearer_env",
+        "header_env"
+      ],
+      "title": "TargetRecord",
+      "type": "object"
+    },
+    "ToolVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "mcp_version": {
+          "title": "Mcp Version",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "mcp_version"
+      ],
+      "title": "ToolVersion",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/smusali/mcp-cross-exam/blob/main/schemas/report.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "coverage": {
+      "$ref": "#/$defs/Coverage"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "run": {
+      "$ref": "#/$defs/RunRecord"
+    },
+    "score": {
+      "title": "Score",
+      "type": "integer"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerRecord"
+    },
+    "target": {
+      "$ref": "#/$defs/TargetRecord"
+    },
+    "tool": {
+      "$ref": "#/$defs/ToolVersion"
+    }
+  },
+  "required": [
+    "tool",
+    "target",
+    "server",
+    "run",
+    "coverage",
+    "score",
+    "findings"
+  ],
+  "title": "Report",
+  "type": "object"
+}

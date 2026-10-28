@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pytest
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.config import ConfigError, load_settings
 from mcp_cross_exam.exit_codes import ExitCode
@@ -12,10 +13,9 @@ from mcp_cross_exam.probes.base import Observation, Probe, ProbeContext, RunBudg
 from mcp_cross_exam.runner import BUDGET_SKIP, examine
 from mcp_cross_exam.transport import Finding
 from mcp_cross_exam.transport.http import open_http
-
 from tests.conftest import start_fixture
 from tests.probes.conftest import audit_http
-from tests.test_transport import StreamingASGITransport
+from tests.support.asgi import StreamingASGITransport
 
 
 def test_each_config_section(tmp_path: Path) -> None:

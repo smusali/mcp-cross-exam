@@ -5,14 +5,14 @@ import sys
 from pathlib import Path
 
 import anyio
+
 from mcp_cross_exam.fixture import FixtureApp, parse_defects
-from mcp_cross_exam.probes import examine
 from mcp_cross_exam.probes.base import ProbeContext
+from mcp_cross_exam.runner import examine
 from mcp_cross_exam.transport import Finding
 from mcp_cross_exam.transport.http import open_http
 from mcp_cross_exam.transport.stdio import open_stdio
-
-from tests.test_transport import StreamingASGITransport
+from tests.support.asgi import StreamingASGITransport
 
 
 def finding_ids(findings: list[Finding]) -> set[str]:

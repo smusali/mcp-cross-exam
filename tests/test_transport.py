@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-import asyncio
 import ctypes
 import json
 import os
 import sys
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, MutableMapping
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from ctypes import wintypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import anyio
-import httpx2
 import pytest
 import typer
-from anyio.streams.memory import MemoryObjectReceiveStream
 from mcp.server.mcpserver import MCPServer
 from mcp.shared.exceptions import MCPError
+from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT
+from pydantic import ValidationError
+from typer.testing import CliRunner
+
 from mcp_cross_exam.cli import app, bind_stdio, main, release_stdio
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.transport.base import (
@@ -36,9 +36,8 @@ from mcp_cross_exam.transport.base import (
 )
 from mcp_cross_exam.transport.http import HttpTransport, open_http, path_is_sse
 from mcp_cross_exam.transport.stdio import StdioTransport, child_environment, open_stdio
-from mcp_types import CONNECTION_CLOSED, REQUEST_TIMEOUT
-from pydantic import ValidationError
-from typer.testing import CliRunner
+from mcp_cross_exam.types import DataError
+from tests.support.asgi import StreamingASGITransport
 
 RUNNER = CliRunner()
 TOOLS: dict[str, object] = {
@@ -176,123 +175,6 @@ def _loads(body: bytes) -> dict[str, object]:
 
 def _text(value: object) -> str:
     return value if isinstance(value, str) else ""
-
-
-class _LiveBody(httpx2.AsyncByteStream):
-    def __init__(
-        self,
-        chunks: MemoryObjectReceiveStream[bytes | None],
-        disconnect: asyncio.Event,
-        task: asyncio.Task[None],
-    ) -> None:
-        self._chunks = chunks
-        self._disconnect = disconnect
-        self._task = task
-        self._closed = False
-
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        try:
-            async for chunk in self._chunks:
-                if chunk is None:
-                    return
-                yield chunk
-        finally:
-            await self.aclose()
-
-    async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        self._disconnect.set()
-        await self._chunks.aclose()
-        try:
-            await asyncio.wait_for(self._task, timeout=2)
-        except (TimeoutError, asyncio.CancelledError):
-            self._task.cancel()
-            with suppress(Exception):
-                await self._task
-
-
-class StreamingASGITransport(httpx2.AsyncBaseTransport):
-    def __init__(self, app: Callable[[Message, Receive, Send], Awaitable[None]]) -> None:
-        self._app = app
-
-    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        body = request.content if isinstance(request.content, bytes) else b""
-        sent = False
-        disconnect = asyncio.Event()
-        started = asyncio.Event()
-        status = 500
-        headers: list[tuple[bytes, bytes]] = []
-        failed: list[BaseException] = []
-        outgoing, incoming = anyio.create_memory_object_stream[bytes | None](256)
-
-        async def receive() -> Message:
-            nonlocal sent
-            if not sent:
-                sent = True
-                return {"type": "http.request", "body": body, "more_body": False}
-            await disconnect.wait()
-            return {"type": "http.disconnect"}
-
-        async def send(message: Message) -> None:
-            nonlocal status, headers
-            kind = message.get("type")
-            if kind == "http.response.start":
-                code = message.get("status")
-                status = code if isinstance(code, int) else 500
-                raw_headers = message.get("headers")
-                if isinstance(raw_headers, list):
-                    headers = []
-                    for item in raw_headers:
-                        pair = _byte_pair(item)
-                        if pair is not None:
-                            headers.append(pair)
-                started.set()
-                return
-            if kind != "http.response.body":
-                return
-            payload = message.get("body")
-            if isinstance(payload, bytes) and payload and request.method != "HEAD":
-                await outgoing.send(payload)
-            if not message.get("more_body"):
-                await outgoing.send(None)
-
-        async def run() -> None:
-            scope: Message = {
-                "type": "http",
-                "asgi": {"version": "3.0"},
-                "http_version": "1.1",
-                "method": request.method,
-                "headers": [(key.lower(), value) for key, value in request.headers.raw],
-                "scheme": request.url.scheme,
-                "path": request.url.path,
-                "raw_path": request.url.raw_path.split(b"?")[0],
-                "query_string": request.url.query,
-                "server": (request.url.host, request.url.port),
-                "client": ("127.0.0.1", 123),
-                "root_path": "",
-            }
-            try:
-                await self._app(scope, receive, send)
-            except Exception as exc:
-                failed.append(exc)
-            finally:
-                started.set()
-                with suppress(Exception):
-                    await outgoing.send(None)
-                await outgoing.aclose()
-
-        task = asyncio.create_task(run())
-        await started.wait()
-        if failed and not headers and status == 500:
-            await incoming.aclose()
-            raise failed[0]
-        return httpx2.Response(
-            status,
-            headers=headers,
-            stream=_LiveBody(incoming, disconnect, task),
-        )
 
 
 class Peer:
@@ -772,6 +654,10 @@ async def _reap(tmp_path: Path) -> None:
 def _alive(pid: int) -> bool:
     if sys.platform == "win32":
         return _windows_alive(pid)
+    stat = Path(f"/proc/{pid}/stat")
+    if stat.is_file():
+        fields = stat.read_text(encoding="utf-8").rsplit(")", 1)[-1].split()
+        return bool(fields) and fields[0] != "Z"
     try:
         os.kill(pid, 0)
     except OSError:
@@ -889,19 +775,13 @@ def test_typed_failures_keep_their_meaning() -> None:
     assert isinstance(failure_from(anyio.EndOfStream()), TransportClosed)
     assert isinstance(failure_from(OSError()), ConnectFailed)
     assert isinstance(failure_from(RuntimeError()), ProtocolError)
-    try:
-        raise ValidationError.from_exception_data("Result", [])
-    except ValidationError as exc:
-        assert isinstance(failure_from(exc), ProtocolError)
+    error = ValidationError.from_exception_data("Result", [])
+    assert isinstance(failure_from(error), ProtocolError)
     assert isinstance(collapse(ExceptionGroup("g", [HandshakeFailed("no")])), HandshakeFailed)
-    try:
+    with pytest.raises(DataError, match="key"):
         json_value({1: "a"})
-    except ProtocolError as exc:
-        assert "key" in str(exc)
-    try:
+    with pytest.raises(DataError, match="json"):
         json_value(object())
-    except ProtocolError as exc:
-        assert "json" in str(exc)
 
 
 def test_child_environment_keeps_the_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:

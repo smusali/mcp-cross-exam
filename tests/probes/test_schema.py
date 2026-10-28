@@ -12,12 +12,12 @@ import jsonschema
 import pytest
 from hypothesis import given
 from hypothesis import settings as hypothesis_settings
+
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.fixture import DEFECT_IDS, FixtureApp, parse_defects
-from mcp_cross_exam.probes import examine
 from mcp_cross_exam.probes.base import Probe, ProbeContext, observation_from_json, probe_family
 from mcp_cross_exam.probes.schema import collect_definitions
-from mcp_cross_exam.runner import load_probes
+from mcp_cross_exam.runner import examine, load_probes
 from mcp_cross_exam.schema_audit import (
     argument_examples,
     cache_hints_invalid,
@@ -36,7 +36,6 @@ from mcp_cross_exam.schema_audit import (
     result_size,
     result_text,
     schema_issue,
-    snapshot_document,
     snapshot_drift,
     string_property,
     without_required,
@@ -47,14 +46,13 @@ from mcp_cross_exam.transport import Finding, Frame
 from mcp_cross_exam.transport.base import JsonValue
 from mcp_cross_exam.transport.http import open_http
 from mcp_cross_exam.transport.stdio import open_stdio
-
 from tests.conftest import start_fixture
 from tests.probes.conftest import finding_ids
-from tests.test_cli import _invoke
-from tests.test_transport import StreamingASGITransport
+from tests.support.asgi import StreamingASGITransport
+from tests.support.invoke import invoke as _invoke
 
 ROOT = Path(__file__).resolve().parents[2]
-CORPUS = ROOT / "tests" / "corpus"
+CORPUS = ROOT / "tests" / "data"
 ERAS = ("2025-11-25", "2026-07-28")
 MODERN = "2026-07-28"
 _OBSERVER = "schema.annotation-readonly-violated"
@@ -241,7 +239,8 @@ def test_description_corpus() -> None:
         assert isinstance(case, dict)
         names = case.get("properties")
         description = case.get("description")
-        assert isinstance(names, list) and isinstance(description, str)
+        assert isinstance(names, list)
+        assert isinstance(description, str)
         properties: dict[str, JsonValue] = {}
         for name in names:
             if isinstance(name, str):
@@ -258,7 +257,8 @@ def test_description_corpus() -> None:
         assert isinstance(case, dict)
         description = case.get("description")
         examples = case.get("examples")
-        assert isinstance(description, str) and isinstance(examples, list)
+        assert isinstance(description, str)
+        assert isinstance(examples, list)
         example_schema: dict[str, JsonValue] = {"examples": examples, "type": "object"}
         assert list(argument_examples(description, example_schema)) == case["values"]
 
@@ -270,7 +270,9 @@ def test_saved_observations() -> None:
         assert isinstance(case, dict)
         probe_id = case.get("id")
         assert isinstance(probe_id, str)
-        found = probes[probe_id].assert_(observation_from_json(case.get("observation")))
+        found = probes[probe_id].assert_(  # noqa: PT009
+            observation_from_json(case.get("observation"))
+        )
         if case.get("expect") is True:
             assert finding_ids(found) == {probe_id}
             severity = case.get("severity")
@@ -305,7 +307,8 @@ def test_generation_snapshot_and_schema_edges(tmp_path: Path) -> None:
     assert dated == "2020-01-02T03:04:05Z"
     assert generated_value({"format": "uri", "type": "string"}, rng) == "https://example.com"
     short = generated_value({"maxLength": 2, "minLength": 2, "type": "string"}, rng)
-    assert isinstance(short, str) and len(short) == 2
+    assert isinstance(short, str)
+    assert len(short) == 2
     assert generated_value({"maximum": 4, "minimum": 4, "type": "integer"}, rng) == 4
     assert isinstance(generated_value({"type": "number"}, rng), int)
     assert generated_value({"type": "boolean"}, rng) in {False, True}
@@ -332,7 +335,8 @@ def test_generation_snapshot_and_schema_edges(tmp_path: Path) -> None:
         "type": "object",
     }
     extra = extra_arguments(closed, {"title": "ok"}, 3)
-    assert extra is not None and extra["crossexam_extra_3"] == "x"
+    assert extra is not None
+    assert extra["crossexam_extra_3"] == "x"
     base: dict[str, JsonValue] = {"other": 1, "title": "ok"}
     dropped = without_required({"required": ["title"], "type": "object"}, base)
     assert dropped == (("title", {"other": 1}),)
@@ -370,7 +374,6 @@ def test_generation_snapshot_and_schema_edges(tmp_path: Path) -> None:
     kept: dict[str, JsonValue] = {"description": "a", "name": "keep"}
     changed: dict[str, JsonValue] = {"description": "b", "name": "keep"}
     previous: dict[str, JsonValue] = {
-        "snapshot_version": 1,
         "tools": [
             {"definition": kept, "hash": "0", "name": "keep"},
             {"definition": {"name": "gone"}, "hash": "0", "name": "gone"},
@@ -383,11 +386,11 @@ def test_generation_snapshot_and_schema_edges(tmp_path: Path) -> None:
     stored: dict[str, JsonValue] = {"tools": [{"definition": kept, "name": "keep"}]}
     assert snapshot_drift([kept], stored) == ()
     path = tmp_path / "snapshot.json"
-    path.write_text('{"snapshot_version": 2}\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="version"):
+    path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid"):
         load_snapshot(path)
-    path.write_text('{"snapshot_version": 1}\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="tools"):
+    path.write_text('{"hash": "abc", "tools": "no"}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid"):
         load_snapshot(path)
 
 
@@ -401,7 +404,8 @@ def test_same_seed_builds_the_same_call() -> None:
     }
     first = minimal_arguments(schema, Random(7), None)
     second = minimal_arguments(schema, Random(7), None)
-    assert first is not None and second is not None
+    assert first is not None
+    assert second is not None
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
     assert minimal_arguments(schema, Random(7), {"status": "open"}) == {"status": "open"}
 
@@ -455,7 +459,7 @@ def test_every_mutation_is_invalid(prop: dict[str, JsonValue]) -> None:
 def test_snapshot_bytes_match_the_golden(tmp_path: Path) -> None:
     golden = (CORPUS / "snapshot.golden.json").read_bytes()
     document = json.loads(golden)
-    schema = json.loads((ROOT / "mcp_cross_exam" / "snapshot.v1.json").read_text(encoding="utf-8"))
+    schema = json.loads((ROOT / "schemas" / "snapshot.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator(schema).validate(document)
     assert isinstance(document, dict)
     tools = document.get("tools")
@@ -471,7 +475,6 @@ def test_snapshot_bytes_match_the_golden(tmp_path: Path) -> None:
     write_snapshot(first, definitions)
     write_snapshot(second, definitions)
     assert first.read_bytes() == second.read_bytes() == golden
-    assert snapshot_document(definitions)["snapshot_version"] == 1
 
 
 @pytest.mark.parametrize("era", ERAS)
@@ -584,7 +587,8 @@ def test_definition_drift_after_a_description_change(tmp_path: Path, era: str) -
     assert data is not None
     assert data["tool"] == "get_ticket"
     assert data["kind"] == "changed"
-    assert isinstance(data["diff"], str) and "Changed." in data["diff"]
+    assert isinstance(data["diff"], str)
+    assert "Changed." in data["diff"]
 
 
 def test_missing_snapshot_is_a_config_error(tmp_path: Path) -> None:
@@ -600,7 +604,7 @@ def test_snapshot_command_stays_a_command() -> None:
 
 
 def test_snapshot_write_is_byte_stable(tmp_path: Path) -> None:
-    schema = json.loads((ROOT / "mcp_cross_exam" / "snapshot.v1.json").read_text(encoding="utf-8"))
+    schema = json.loads((ROOT / "schemas" / "snapshot.schema.json").read_text(encoding="utf-8"))
     with start_fixture() as port:
         url = f"http://127.0.0.1:{port}/mcp"
         first = tmp_path / "first.json"

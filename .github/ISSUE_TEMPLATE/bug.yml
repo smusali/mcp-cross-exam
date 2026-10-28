@@ -1,0 +1,44 @@
+name: Bug
+description: A command failed or produced the wrong result.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `mcp-cross-exam --version`.
+      placeholder: mcp-cross-exam 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The command you ran, with secrets removed.
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio
+        - streamable HTTP
+        - legacy HTTP+SSE
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Protocol revision
+      placeholder: 2025-11-25
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The exit code and the relevant report or stderr, with secrets removed.
+    validations:
+      required: true

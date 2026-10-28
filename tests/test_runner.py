@@ -6,6 +6,7 @@ from pathlib import Path
 import anyio
 import jsonschema
 import pytest
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.fixture import FixtureApp
@@ -24,9 +25,8 @@ from mcp_cross_exam.runner import REVISION_SKIP, SelectionError, examine, load_p
 from mcp_cross_exam.transport import Finding, Frame, RunContext
 from mcp_cross_exam.transport.base import json_value, parse_json_bytes
 from mcp_cross_exam.transport.http import HttpTransport, open_http
-
 from tests.conftest import start_fixture
-from tests.test_transport import StreamingASGITransport
+from tests.support.asgi import StreamingASGITransport
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIPPED = {
@@ -99,7 +99,7 @@ def test_probe_list_matches_the_schema(capsys: pytest.CaptureFixture[str]) -> No
         main(["probes", "list", "--json"])
     assert caught.value.code == ExitCode.SUCCESS
     payload = json.loads(capsys.readouterr().out)
-    schema = json.loads((ROOT / "mcp_cross_exam" / "probes.v1.json").read_text(encoding="utf-8"))
+    schema = json.loads((ROOT / "schemas" / "probes.schema.json").read_text(encoding="utf-8"))
     jsonschema.validate(payload, schema)
     assert {item["id"] for item in payload} == SHIPPED
 
@@ -174,10 +174,10 @@ def test_revision_miss_is_a_skip(tmp_path: Path) -> None:
 
 
 def test_frozen_empty_success_observation() -> None:
-    raw = (ROOT / "tests" / "empty-success.json").read_text(encoding="utf-8")
+    raw = (ROOT / "tests" / "data" / "empty-success.json").read_text(encoding="utf-8")
     loaded = json_value(json.loads(raw))
     observation = observation_from_json(loaded)
-    found = SessionExpiredEmptySuccess().assert_(observation)
+    found = SessionExpiredEmptySuccess().assert_(observation)  # noqa: PT009
     assert [item.item_id for item in found] == ["session.expired-empty-success"]
 
 

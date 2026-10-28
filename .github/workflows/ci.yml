@@ -10,12 +10,13 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     name: test (${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -32,17 +33,14 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --frozen --extra dev
-
-      - name: Install Chromium
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
-        run: uv run playwright install --with-deps chromium
+        run: uv sync --frozen --group dev
 
       - name: Test
         run: uv run pytest
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,7 +52,7 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --frozen --extra dev
+        run: uv sync --frozen --group dev
 
       - name: Lint
         run: uv run ruff check .
@@ -63,13 +61,20 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Types
-        run: uv run mypy --strict mcp_cross_exam tests tools
+        run: uv run mypy --strict src/mcp_cross_exam tests tools
 
       - name: Imports
         run: uv run lint-imports
 
+      - name: Dependencies
+        run: uv run deptry src
+
+      - name: Hooks
+        run: uv run pre-commit run --all-files
+
   package:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,46 +86,23 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --frozen --extra dev
+        run: uv sync --frozen --group dev
 
       - name: Changelog section
         run: uv run python tools/check_changelog.py
 
-      - name: Report contract
-        run: uv run python tools/check_json_contract.py
-
-      - name: Methodology
-        run: uv run python tools/check_methodology.py
+      - name: Schemas
+        run: uv run python tools/export_schemas.py --check
 
       - name: Action pins
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run python tools/check_action_pins.py
-          tmp="$(mktemp)"
-          printf '%s\n' '- uses: actions/checkout@v4' > "$tmp"
-          if uv run python tools/check_action_pins.py "$tmp"; then
-            echo "expected unpinned reference to fail"
-            exit 1
-          fi
+        run: uv run python tools/check_action_pins.py
 
       - name: Build
-        run: |
-          uv run python -m build
-          uv run twine check --strict dist/*
-          uv run python tools/check_wheel.py
-
-      - name: Install the wheel into a clean environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv venv --python 3.13 /tmp/wheel-venv
-          uv pip install --python /tmp/wheel-venv/bin/python dist/*.whl
-          /tmp/wheel-venv/bin/mcp-cross-exam --help
-          /tmp/wheel-venv/bin/python -m mcp_cross_exam --help
+        run: tools/check_dist.sh
 
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,13 +114,14 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --frozen --extra dev
+        run: uv sync --frozen --group dev
 
       - name: Audit locked dependencies
-        run: uv run pip-audit
+        run: tools/pip_audit.sh
 
   links:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,3 +132,16 @@ jobs:
         with:
           args: --no-progress --exclude '127\.0\.0\.1' '**/*.md'
           fail: true
+
+  security:
+    uses: ./.github/workflows/security.yml
+
+  check:
+    needs: [test, lint, package, audit, links, security]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail when a required job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

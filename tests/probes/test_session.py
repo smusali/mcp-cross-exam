@@ -10,6 +10,7 @@ from pathlib import Path
 
 import anyio
 import pytest
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.fixture import (
@@ -19,14 +20,14 @@ from mcp_cross_exam.fixture import (
     FixtureState,
     Reply,
 )
-from mcp_cross_exam.probes import examine, is_empty_success
+from mcp_cross_exam.probes import is_empty_success
 from mcp_cross_exam.probes.base import Observation, Probe, ProbeContext, ToolView
+from mcp_cross_exam.runner import examine
 from mcp_cross_exam.transport import Finding
 from mcp_cross_exam.transport.base import JsonValue, json_value
 from mcp_cross_exam.transport.http import open_http
-
 from tests.probes.conftest import audit_http, audit_stdio, finding_ids, free_port
-from tests.test_transport import StreamingASGITransport
+from tests.support.asgi import StreamingASGITransport
 
 Message = MutableMapping[str, object]
 Receive = Callable[[], Awaitable[Message]]

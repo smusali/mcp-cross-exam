@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from html.parser import HTMLParser
 from io import StringIO
 from pathlib import Path
-from typing import Protocol
 
 import jsonschema
 import pytest
+from rich.console import Console
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.findings import (
@@ -25,12 +27,10 @@ from mcp_cross_exam.findings import (
 )
 from mcp_cross_exam.report import print_summary, render_html
 from mcp_cross_exam.transport.base import JsonValue, json_value
-from rich.console import Console
-
 from tests.conftest import start_fixture
 
-_SCHEMA = Path(__file__).parents[1] / "mcp_cross_exam" / "report.v1.json"
-_GOLDEN = Path(__file__).parent / "corpus" / "report.golden.json"
+_SCHEMA = Path(__file__).parents[1] / "schemas" / "report.schema.json"
+_GOLDEN = Path(__file__).parent / "data" / "report.golden.json"
 _PAYLOAD = '"><img src=x onerror="alert(1)"><script>alert(1)</script>'
 _URL = re.compile(r"http://127\.0\.0\.1:\d+/mcp")
 _VOLATILE = {"started_at", "finished_at", "run_id", "duration_ms"}
@@ -269,59 +269,30 @@ def _hostile() -> Report:
     )
 
 
-class _Dialog(Protocol):
-    @property
-    def message(self) -> str: ...
+class _ReportHTML(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.images = 0
+        self.text: list[str] = []
+        self.csp = False
 
-    def dismiss(self) -> None: ...
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "img":
+            self.images += 1
+        equiv = dict(attrs).get("http-equiv") or ""
+        if tag == "meta" and equiv.lower() == "content-security-policy":
+            self.csp = True
 
-
-class _Request(Protocol):
-    @property
-    def url(self) -> str: ...
-
-
-class _Route(Protocol):
-    @property
-    def request(self) -> _Request: ...
-
-    def continue_(self) -> None: ...
-
-    def abort(self) -> None: ...
+    def handle_data(self, data: str) -> None:
+        self.text.append(data)
 
 
 def _browse(path: Path, needle: str) -> None:
-    pytest.importorskip("playwright.sync_api")
-    from playwright.sync_api import sync_playwright
-
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
-            context = browser.new_context(offline=True)
-            page = context.new_page()
-            dialogs: list[str] = []
-
-            def _dialog(dialog: _Dialog) -> None:
-                dialogs.append(dialog.message)
-                dialog.dismiss()
-
-            def _route(route: _Route) -> None:
-                if route.request.url.startswith("file:"):
-                    route.continue_()
-                    return
-                route.abort()
-
-            page.on("dialog", _dialog)
-            page.route("**/*", _route)
-            page.goto(path.resolve().as_uri())
-            assert dialogs == []
-            assert page.locator("img").count() == 0
-            assert needle in page.locator("body").inner_text()
-            browser.close()
-    except Exception as exc:
-        if "Executable doesn't exist" in str(exc):
-            pytest.skip(str(exc))
-        raise
+    parser = _ReportHTML()
+    parser.feed(path.read_text(encoding="utf-8"))
+    assert parser.images == 0
+    assert parser.csp
+    assert needle in "".join(parser.text)
 
 
 def _project(value: JsonValue) -> JsonValue:

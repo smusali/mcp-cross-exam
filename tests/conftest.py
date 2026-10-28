@@ -13,12 +13,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _runs_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    root = tmp_path / "runs"
-
-    def runs() -> Path:
-        return root
-
-    monkeypatch.setattr("mcp_cross_exam.cli.runs_root", runs)
+    monkeypatch.setenv("MCP_CROSS_EXAM_RUNS", str(tmp_path / "runs"))
 
 
 def free_port() -> int:

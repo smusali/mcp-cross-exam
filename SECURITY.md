@@ -1,8 +1,8 @@
 # Security policy
 
-mcp-cross-exam sends traffic only to targets the operator names. The production guard is on by default: the runner refuses a target that is not an allowlisted fixture unless the operator overrides that refusal. Writes happen only against allowlisted targets.
+The production guard allows a stdio command, a loopback host, and a host that matches `[target] allow`. `--target-is-not-production` still requires that allow-list match.
 
-Credentials are read from the environment. They are redacted from every artifact the tool writes.
+Credentials are read from the environment and redacted from the run directory.
 
 ## Reporting a vulnerability
 
@@ -10,4 +10,4 @@ Report vulnerabilities privately through [GitHub security advisories](https://gi
 
 ## Supported versions
 
-Only the latest release published on PyPI receives security fixes. This tree is still pre-release.
+Only the latest release published on PyPI receives security fixes.

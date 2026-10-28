@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "JsonValue": {},
+    "SnapshotTool": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Definition",
+          "type": "object"
+        },
+        "hash": {
+          "title": "Hash",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "hash",
+        "definition"
+      ],
+      "title": "SnapshotTool",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/smusali/mcp-cross-exam/blob/main/schemas/snapshot.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "hash": {
+      "title": "Hash",
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "$ref": "#/$defs/SnapshotTool"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "hash",
+    "tools"
+  ],
+  "title": "Snapshot",
+  "type": "object"
+}

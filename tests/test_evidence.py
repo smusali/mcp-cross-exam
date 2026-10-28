@@ -10,6 +10,7 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import assume, given
 from hypothesis import settings as hypothesis_settings
+
 from mcp_cross_exam.cli import main
 from mcp_cross_exam.evidence import (
     BODY_LIMIT,
@@ -24,7 +25,6 @@ from mcp_cross_exam.exit_codes import ExitCode
 from mcp_cross_exam.fixture import VALID_TOKEN
 from mcp_cross_exam.transport.base import JsonValue, json_value, make_frame
 from mcp_cross_exam.transport.http import open_http
-
 from tests.conftest import start_fixture
 
 _SECRET = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=8, max_size=24)

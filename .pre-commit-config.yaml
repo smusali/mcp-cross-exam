@@ -1,4 +1,10 @@
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
   - repo: local
     hooks:
       - id: ruff
@@ -13,7 +19,7 @@ repos:
         types: [python]
       - id: mypy
         name: mypy
-        entry: uv run mypy --strict mcp_cross_exam tests tools
+        entry: uv run mypy --strict src/mcp_cross_exam tests tools
         language: system
         pass_filenames: false
         types: [python]
@@ -23,3 +29,9 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+      - id: changelog
+        name: changelog
+        entry: uv run python tools/check_changelog.py
+        language: system
+        pass_filenames: false
+        files: ^docs/CHANGELOG\.md$

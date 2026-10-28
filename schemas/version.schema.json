@@ -1,0 +1,37 @@
+{
+  "$id": "https://github.com/smusali/mcp-cross-exam/blob/main/schemas/version.schema.json",
+  "properties": {
+    "mcp_version": {
+      "title": "Mcp Version",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "protocol_revisions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Protocol Revisions",
+      "type": "array"
+    },
+    "python_version": {
+      "title": "Python Version",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "mcp_version",
+    "python_version",
+    "protocol_revisions"
+  ],
+  "title": "VersionFacts",
+  "type": "object"
+}
