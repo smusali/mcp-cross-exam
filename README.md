@@ -2,16 +2,6 @@
 
 Audit one MCP server and write a scored report.
 
-```mermaid
-flowchart LR
-  T["Endpoint"] --> G{"Guard"}
-  G -->|"refused"| X["Exit 2"]
-  G -->|"allowed"| C["Connect"]
-  C --> P["Run probes"]
-  P --> S["Score"]
-  S --> R["JSON and HTML"]
-```
-
 ## Install
 
 ```sh
