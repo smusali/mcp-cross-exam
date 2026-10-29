@@ -1,4 +1,4 @@
-# mcp-cross-exam
+# MCP Cross Exam
 
 Audit one MCP server and write a scored report.
 
