@@ -1,0 +1,47 @@
+site_name: MCP Cross Exam
+site_url: https://smusali.github.io/mcp-cross-exam/
+repo_url: https://github.com/smusali/mcp-cross-exam
+repo_name: smusali/mcp-cross-exam
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+extra:
+  version:
+    provider: mike
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+
+nav:
+  - Getting Started: index.md
+  - Usage: USAGE.md
+  - Methodology: METHODOLOGY.md
+  - Limitations: limitations.md
+  - Project:
+      - Changelog: CHANGELOG.md
+      - Contributing: CONTRIBUTING.md
+      - Security: https://github.com/smusali/mcp-cross-exam/blob/main/SECURITY.md

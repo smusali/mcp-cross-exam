@@ -11,7 +11,16 @@ uv run mypy --strict src/mcp_cross_exam tests tools
 uv run lint-imports
 ```
 
+The documentation site uses the `docs` group:
+
+```sh
+uv sync --frozen --group docs && uv run mkdocs build
+```
+
 Tests may open sockets only to `127.0.0.1` and `::1`.
+
+CI runs [checkOwners](https://github.com/smusali/checkowners). `@smusali` is the
+sole owner, so a single expert does not fail the job.
 
 ## Layers
 
@@ -43,3 +52,4 @@ Add the probe class next to the others and register it. Set `impact`, `summary`,
 2. Set `__version__` to that version.
 3. Tag `vX.Y.Z`. A tag that contains `rc` publishes to TestPyPI. Any other tag publishes to PyPI.
 4. The release workflow builds the wheel, checks the changelog, and uploads attestations.
+5. The docs workflow deploys that version and points `latest` at it.

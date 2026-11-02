@@ -28,7 +28,7 @@ _REQUIRED_URLS = (
     "https://github.com/smusali/mcp-cross-exam",
     "https://github.com/smusali/mcp-cross-exam/issues",
     "https://github.com/smusali/mcp-cross-exam/blob/main/docs/CHANGELOG.md",
-    "https://github.com/smusali/mcp-cross-exam/blob/main/docs/USAGE.md",
+    "https://smusali.github.io/mcp-cross-exam/",
 )
 
 
