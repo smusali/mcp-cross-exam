@@ -1,0 +1,12 @@
+policy:
+  drift:
+    fail: true
+
+github:
+  resolve_teams: false
+
+contributors:
+  exclude:
+    - "@cursoragent"
+    - cursoragent@cursor.com
+    - noreply@anthropic.com

@@ -136,11 +136,26 @@ jobs:
   security:
     permissions:
       contents: read
+      actions: read
       security-events: write
     uses: $/.github/workflows/security.yml
 
+  checkowners:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: smusali/checkowners@e39ae1353928f0b9e99425c00619e2728338e24b # v0.7.0
+
   check:
-    needs: [test, lint, package, audit, links, security]
+    needs: [test, lint, package, audit, links, security, checkowners]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

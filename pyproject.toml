@@ -64,6 +64,11 @@ dev = [
   "hypothesis>=6.140,<7",
   "deptry>=0.23,<1",
 ]
+docs = [
+  "mkdocs>=1.6,<2",
+  "mkdocs-material>=9.6,<10",
+  "mike>=2.1,<3",
+]
 
 [project.scripts]
 mcp-cross-exam = "mcp_cross_exam.cli:main"
@@ -73,7 +78,7 @@ Homepage = "https://github.com/smusali/mcp-cross-exam"
 Repository = "https://github.com/smusali/mcp-cross-exam"
 Issues = "https://github.com/smusali/mcp-cross-exam/issues"
 Changelog = "https://github.com/smusali/mcp-cross-exam/blob/main/docs/CHANGELOG.md"
-Documentation = "https://github.com/smusali/mcp-cross-exam/blob/main/docs/USAGE.md"
+Documentation = "https://smusali.github.io/mcp-cross-exam/"
 
 [tool.hatch.version]
 path = "src/mcp_cross_exam/__init__.py"
